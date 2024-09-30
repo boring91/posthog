@@ -50,6 +50,7 @@ import {
     convertToHogFunctionInvocationGlobals,
     createInvocation,
     cyclotronJobToInvocation,
+    emitCyclotronMetrics,
     gzipObject,
     invocationToCyclotronJobUpdate,
     prepareLogEntriesForClickhouse,
@@ -378,6 +379,7 @@ export class CdpProcessedEventsConsumer extends CdpConsumerBase {
     }
 
     public async processBatch(invocationGlobals: HogFunctionInvocationGlobals[]): Promise<HogFunctionInvocation[]> {
+        emitCyclotronMetrics()
         if (!invocationGlobals.length) {
             return []
         }
@@ -718,6 +720,7 @@ export class CdpCyclotronWorker extends CdpConsumerBase {
     protected queue: 'hog' | 'fetch' = 'hog'
 
     public async processBatch(invocations: HogFunctionInvocation[]): Promise<void> {
+        emitCyclotronMetrics()
         if (!invocations.length) {
             return
         }

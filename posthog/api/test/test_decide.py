@@ -5,7 +5,6 @@ import time
 from typing import Optional
 from unittest.mock import patch, Mock
 
-from inline_snapshot import snapshot
 import pytest
 from django.conf import settings
 from django.core.cache import cache
@@ -88,8 +87,6 @@ class TestDecide(BaseTest, QueryMatchingTest):
     We use Django's base test class instead of DRF's because we need granular control over the Content-Type sent over.
     """
 
-    use_remote_config = False
-
     def setUp(self, *args):
         cache.clear()
 
@@ -120,18 +117,15 @@ class TestDecide(BaseTest, QueryMatchingTest):
         assert_num_queries: Optional[int] = None,
         simulate_database_timeout: bool = False,
     ):
-        if self.use_remote_config:
-            # We test a lot with settings changes so the idea is to refresh the remote config
-            remote_config = RemoteConfig.objects.get(team=self.team)
-            remote_config.sync()
+        # We test a lot with settings changes so the idea is to refresh the remote config
+        remote_config = RemoteConfig.objects.get(team=self.team)
+        remote_config.sync()
 
         if groups is None:
             groups = {}
 
         def do_request():
             url = f"/decide/?v={api_version}"
-            if self.use_remote_config:
-                url += "&use_remote_config=true"
             return self.client.post(
                 url,
                 {
@@ -691,7 +685,7 @@ class TestDecide(BaseTest, QueryMatchingTest):
 
         # caching flag definitions in the above mean fewer queries
         # 3 of these queries are just for setting transaction scope
-        response = self._post_decide(assert_num_queries=0 if self.use_remote_config else 4)
+        response = self._post_decide(assert_num_queries=0)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         injected = response.json()["siteApps"]
         self.assertEqual(len(injected), 1)
@@ -715,7 +709,7 @@ class TestDecide(BaseTest, QueryMatchingTest):
         )
         self.team.refresh_from_db()
         self.assertTrue(self.team.inject_web_apps)
-        response = self._post_decide(assert_num_queries=1 if self.use_remote_config else 5)
+        response = self._post_decide(assert_num_queries=1)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         injected = response.json()["siteApps"]
         self.assertEqual(len(injected), 1)
@@ -3587,44 +3581,6 @@ class TestDecide(BaseTest, QueryMatchingTest):
         self.assertTrue(response.json()["defaultIdentifiedOnly"])
 
 
-class TestDecideRemoteConfig(TestDecide):
-    use_remote_config = True
-
-    def test_definitely_loads_via_remote_config(self, *args):
-        # NOTE: This is a sanity check test that we aren't just using the old decide logic
-
-        with patch.object(
-            RemoteConfig, "get_config_via_token", wraps=RemoteConfig.get_config_via_token
-        ) as wrapped_get_config_via_token:
-            response = self._post_decide(api_version=3)
-            wrapped_get_config_via_token.assert_called_once()
-
-        # NOTE: If this changes it indicates something is wrong as we should keep this exact format
-        # for backwards compatibility
-        assert response.json() == snapshot(
-            {
-                "supportedCompression": ["gzip", "gzip-js"],
-                "captureDeadClicks": False,
-                "capturePerformance": {"network_timing": True, "web_vitals": False, "web_vitals_allowed_metrics": None},
-                "autocapture_opt_out": False,
-                "autocaptureExceptions": False,
-                "analytics": {"endpoint": "/i/v0/e/"},
-                "elementsChainAsString": True,
-                "sessionRecording": False,
-                "heatmaps": False,
-                "surveys": False,
-                "defaultIdentifiedOnly": True,
-                "siteApps": [],
-                "isAuthenticated": False,
-                "toolbarParams": {},
-                "config": {"enable_collect_everything": True},
-                "featureFlags": {},
-                "errorsWhileComputingFlags": False,
-                "featureFlagPayloads": {},
-            }
-        )
-
-
 class TestDatabaseCheckForDecide(BaseTest, QueryMatchingTest):
     """
     Tests that the database check for decide works as expected.
@@ -3833,6 +3789,9 @@ class TestDecideUsesReadReplica(TransactionTestCase):
             name="Org 1", slug=f"org-{dbname}-{random.randint(1, 1000000)}"
         )
         team = Team.objects.db_manager(dbname).create(organization=organization, name="Team 1 org 1")
+        # Tricky the remote config is normally created via a task linked to the standard DB whereas here we are fudging the DB access to simulate things
+        remote_config, _ = RemoteConfig.objects.db_manager(dbname).get_or_create(team=team, defaults={"config": {}})
+        remote_config.sync()
         user = User.objects.db_manager(dbname).create(
             email=f"test-{random.randint(1, 100000)}@posthog.com",
             password="password",
@@ -4617,41 +4576,6 @@ class TestDecideUsesReadReplica(TransactionTestCase):
                 {"groups-flag": True, "default-no-prop-group-flag": True},
             )
             self.assertFalse(response.json()["errorsWhileComputingFlags"])
-
-    @patch(
-        "posthog.models.feature_flag.flag_matching.postgres_healthcheck.is_connected",
-        return_value=True,
-    )
-    def test_site_apps_in_decide_use_replica(self, mock_is_connected):
-        org, team, user = self.setup_user_and_team_in_db("default")
-        self.organization, self.team, self.user = org, team, user
-
-        plugin = Plugin.objects.create(organization=self.team.organization, name="My Plugin", plugin_type="source")
-        PluginSourceFile.objects.create(
-            plugin=plugin,
-            filename="site.ts",
-            source="export function inject (){}",
-            transpiled="function inject(){}",
-            status=PluginSourceFile.Status.TRANSPILED,
-        )
-        PluginConfig.objects.create(
-            plugin=plugin,
-            enabled=True,
-            order=1,
-            team=self.team,
-            config={},
-            web_token="tokentoken",
-        )
-        sync_team_inject_web_apps(self.team)
-
-        # update caches
-        self._post_decide(api_version=3)
-
-        with self.assertNumQueries(4, using="replica"), self.assertNumQueries(0, using="default"):
-            response = self._post_decide(api_version=3)
-            self.assertEqual(response.status_code, status.HTTP_200_OK)
-            injected = response.json()["siteApps"]
-            self.assertEqual(len(injected), 1)
 
     # Adding local evaluation tests for read replica in one place for now, until we move to a separate CI flow for all read replica tests
     # since code-level overrides don't work for theses tests, as they affect the DATABASES setting

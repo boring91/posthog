@@ -237,6 +237,7 @@ export const FEATURE_FLAGS = {
     CDP_ACTIVITY_LOG_NOTIFICATIONS: 'cdp-activity-log-notifications', // owner: #team-cdp
     COOKIELESS_SERVER_HASH_MODE_SETTING: 'cookieless-server-hash-mode-setting', // owner: @robbie-c #team-web-analytics
     INSIGHT_COLORS: 'insight-colors', // owner @thmsobrmlr #team-product-analytics
+    SESSION_REPLAY_PANELS_UI: 'session-replay-panels-ui', // owner: @pauldambra #team-replay
 } as const
 export type FeatureFlagKey = (typeof FEATURE_FLAGS)[keyof typeof FEATURE_FLAGS]
 

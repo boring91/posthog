@@ -451,6 +451,12 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         name: 'Wizard',
         layout: 'plain',
     },
+    [Scene.ClientAuthorization]: {
+        projectBased: false,
+        name: 'Authorize client',
+        hideProjectNotice: true,
+        layout: 'plain',
+    },
     ...productConfiguration,
 }
 
@@ -652,5 +658,6 @@ export const routes: Record<string, [Scene | string, string]> = {
     [urls.heatmaps()]: [Scene.Heatmaps, 'heatmaps'],
     [urls.sessionAttributionExplorer()]: [Scene.SessionAttributionExplorer, 'sessionAttributionExplorer'],
     [urls.wizard()]: [Scene.Wizard, 'wizard'],
+    [urls.clientAuthorization()]: [Scene.ClientAuthorization, 'clientAuthorization'],
     ...productRoutes,
 }

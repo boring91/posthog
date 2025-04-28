@@ -8424,7 +8424,7 @@ class MaxRecordingUniversalFilters(BaseModel):
     duration: list[RecordingDurationFilter]
     filter_group: MaxOuterUniversalFiltersGroup
     filter_test_accounts: Optional[bool] = None
-    order: Optional[RecordingOrder] = RecordingOrder.START_TIME
+    order: Optional[str] = "start_time"
 
 
 class PropertyGroupFilter(BaseModel):
@@ -8496,7 +8496,7 @@ class RecordingsQuery(BaseModel):
     )
     offset: Optional[int] = None
     operand: Optional[FilterLogicalOperator] = FilterLogicalOperator.AND_
-    order: Optional[RecordingOrder] = RecordingOrder.START_TIME
+    order: Optional[str] = "start_time"
     person_uuid: Optional[str] = None
     properties: Optional[
         list[

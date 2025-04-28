@@ -21,7 +21,7 @@ import { getCurrentTeamId } from 'lib/utils/getAppContext'
 import posthog from 'posthog-js'
 
 import { activationLogic, ActivationTask } from '~/layout/navigation-3000/sidepanel/panels/activation/activationLogic'
-import { NodeKind, RecordingOrder, RecordingsQuery, RecordingsQueryResponse } from '~/queries/schema/schema-general'
+import { NodeKind, RecordingsQuery, RecordingsQueryResponse } from '~/queries/schema/schema-general'
 import {
     EntityTypes,
     FilterLogicalOperator,
@@ -287,15 +287,12 @@ function combineLegacyRecordingFilters(
     }
 }
 
-function sortRecordings(
-    recordings: SessionRecordingType[],
-    order: RecordingsQuery['order'] | 'duration' = 'start_time'
-): SessionRecordingType[] {
-    const orderKey: RecordingOrder = order === 'duration' ? 'recording_duration' : order
+function sortRecordings(recordings: SessionRecordingType[], order: string = 'start_time'): SessionRecordingType[] {
+    const orderKey = order === 'duration' ? 'recording_duration' : order
 
     return recordings.sort((a, b) => {
-        const orderA = a[orderKey]
-        const orderB = b[orderKey]
+        const orderA = a[orderKey as keyof SessionRecordingType]
+        const orderB = b[orderKey as keyof SessionRecordingType]
         const incomparible = orderA === undefined || orderB === undefined
         return incomparible ? 0 : orderA > orderB ? -1 : 1
     })

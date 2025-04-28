@@ -1,9 +1,9 @@
-from typing import Any, cast, Optional, Union
+from typing import Any, cast, Optional, Union, Literal
 from datetime import datetime, timedelta, UTC
 
 from posthog.hogql import ast
 from posthog.hogql.constants import HogQLGlobalSettings
-from posthog.hogql.parser import parse_select
+from posthog.hogql.parser import parse_select, parse_expr
 from posthog.hogql.property import property_to_expr
 from posthog.hogql_queries.insights.paginators import HogQLHasMorePaginator
 from posthog.models import Team
@@ -12,7 +12,6 @@ from posthog.schema import (
     RecordingsQuery,
     PropertyGroupFilterValue,
     FilterLogicalOperator,
-    RecordingOrder,
 )
 
 import structlog
@@ -66,7 +65,6 @@ class SessionRecordingListFromQuery(SessionRecordingsListingBaseQuery):
         WHERE {where_predicates}
         GROUP BY session_id
         HAVING {having_predicates}
-        ORDER BY {order_by} DESC
         """
 
     @staticmethod
@@ -137,32 +135,41 @@ class SessionRecordingListFromQuery(SessionRecordingsListingBaseQuery):
         )
 
     def get_query(self):
-        return parse_select(
+        # Check if the most recent _timestamp is within five minutes of the current time
+        # proxy for a live session
+        ongoing_expr = ast.CompareOperation(
+            left=ast.Call(name="max", args=[ast.Field(chain=["s", "_timestamp"])]),
+            right=ast.Constant(
+                # provided in a placeholder, so we can pass now from python to make tests easier 🙈
+                value=datetime.now(UTC) - timedelta(minutes=5),
+            ),
+            op=ast.CompareOperationOp.GtEq,
+        )
+
+        base = parse_select(
             self.BASE_QUERY,
             {
-                # Check if the most recent _timestamp is within five minutes of the current time
-                # proxy for a live session
-                "ongoing_selection": ast.Alias(
-                    alias="ongoing",
-                    expr=ast.CompareOperation(
-                        left=ast.Call(name="max", args=[ast.Field(chain=["s", "_timestamp"])]),
-                        right=ast.Constant(
-                            # provided in a placeholder, so we can pass now from python to make tests easier 🙈
-                            value=datetime.now(UTC) - timedelta(minutes=5),
-                        ),
-                        op=ast.CompareOperationOp.GtEq,
-                    ),
-                ),
-                "order_by": self._order_by_clause(),
+                "ongoing_selection": ast.Alias(alias="ongoing", expr=ongoing_expr),
                 "where_predicates": self._where_predicates(),
                 "having_predicates": self._having_predicates() or ast.Constant(value=True),
             },
         )
+        base.order_by = self._order_by_clause()
+        return base
 
-    def _order_by_clause(self) -> ast.Field:
-        # KLUDGE: we only need a default here because mypy is silly
-        order_by = self._query.order.value if self._query.order else RecordingOrder.START_TIME
-        return ast.Field(chain=[order_by])
+    def _order_by_clause(self) -> list[ast.OrderExpr]:
+        order = self._query.order or "start_time"
+        is_desc = not order.startswith("-")
+        field = order.lstrip("-")
+
+        direction: Literal["ASC", "DESC"] = "DESC" if is_desc else "ASC"
+
+        return [
+            ast.OrderExpr(
+                expr=parse_expr(field),
+                order=cast(Literal["ASC", "DESC"], direction),
+            )
+        ]
 
     def _where_predicates(self) -> Union[ast.And, ast.Or]:
         exprs: list[ast.Expr] = [

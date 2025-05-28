@@ -31,6 +31,7 @@ PRODUCTS_APPS = [
     "products.early_access_features",
     "products.links",
     "products.revenue_analytics",
+    "products.chat",
     "products.user_interviews",
 ]
 

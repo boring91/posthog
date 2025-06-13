@@ -1,5 +1,5 @@
 import time
-from typing import Any, Optional
+from typing import Optional
 
 from django.conf import settings
 
@@ -178,24 +178,6 @@ def calculate_cohort_from_list(cohort_id: int, items: list[str], team_id: Option
 
     cohort.insert_users_by_list(items, team_id=team_id)
     logger.warn("Calculating cohort {} from CSV took {:.2f} seconds".format(cohort.pk, (time.time() - start_time)))
-
-
-@shared_task(ignore_result=True, max_retries=1)
-def insert_cohort_from_insight_filter(
-    cohort_id: int, filter_data: dict[str, Any], team_id: Optional[int] = None
-) -> None:
-    """
-    team_id is only optional for backwards compatibility with the old celery task signature.
-    All new tasks should pass team_id explicitly.
-    """
-    from posthog.api.cohort import insert_cohort_actors_into_ch, insert_cohort_people_into_pg
-
-    cohort = Cohort.objects.get(pk=cohort_id)
-    if team_id is None:
-        team_id = cohort.team_id
-
-    insert_cohort_actors_into_ch(cohort, filter_data, team_id=team_id)
-    insert_cohort_people_into_pg(cohort, team_id=team_id)
 
 
 @shared_task(ignore_result=True, max_retries=1)

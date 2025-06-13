@@ -191,7 +191,7 @@ export const FEATURE_FLAGS = {
     HEDGEHOG_SKIN_SPIDERHOG: 'hedgehog-skin-spiderhog', // owner: @benjackwhite
     WEB_EXPERIMENTS: 'web-experiments', // owner: @team-feature-success
     ENVIRONMENTS: 'environments', // owner: @Twixes #team-product-analytics
-    REPLAY_TEMPLATES: 'replay-templates', // owner: @raquelmsmith #team-replay
+    BILLING_PAYMENT_ENTRY_IN_APP: 'billing-payment-entry-in-app', // owner: @zach
     EXPERIMENTS_HOGQL: 'experiments-hogql', // owner: @jurajmajerik #team-experiments
     ROLE_BASED_ACCESS_CONTROL: 'role-based-access-control', // owner: @zach
     MESSAGING: 'messaging-product', // owner @haven #team-messaging
@@ -221,10 +221,8 @@ export const FEATURE_FLAGS = {
     EXPERIMENT_P_VALUE: 'experiment-p-value', // owner: @jurajmajerik #team-experiments
     WEB_ANALYTICS_IMPROVED_PATH_CLEANING: 'web-analytics-improved-path-cleaning', // owner: @rafaeelaudibert #team-web-analytics
     EXPERIMENTAL_DASHBOARD_ITEM_RENDERING: 'experimental-dashboard-item-rendering', // owner: @thmsobrmlr #team-product-analytics
-    RECORDINGS_AI_FILTER: 'recordings-ai-filter', // owner: @veryayskiy #team-replay
     PATHS_V2: 'paths-v2', // owner: @thmsobrmlr #team-product-analytics
     EXPERIMENTS_NEW_QUERY_RUNNER: 'experiments-new-query-runner', // owner: #team-experiments
-    RECORDINGS_AI_REGEX: 'recordings-ai-regex', // owner: @veryayskiy #team-replay
     EXPERIMENTS_NEW_QUERY_RUNNER_AA_TEST: 'experiments-new-query-runner-aa-test', // #team-experiments
     ONBOARDING_DATA_WAREHOUSE_FOR_PRODUCT_ANALYTICS: 'onboarding-data-warehouse-for-product-analytics', // owner: @joshsny #team-growth
     DELAYED_LOADING_ANIMATION: 'delayed-loading-animation', // owner: @raquelmsmith
@@ -276,14 +274,11 @@ export const FEATURE_FLAGS = {
     CDP_HOG_INPUT_LIQUID: 'cdp-hog-input-liquid', // owner: #team-messaging
     SIMPLE_INFINITE_LIST_NUMERICAL_FILTER: 'simple-infinite-list-numerical-filter', // owner: @rafaeelaudibert #team-revenue-analytics
     REVENUE_ANALYTICS_FILTERS: 'revenue-analytics-filters', // owner: @rafaeelaudibert #team-revenue-analytics
-    REPLAY_SCREENSHOT: 'replay-screenshot', // owner: @veryayskiy #team-replay
     SCREENSHOT_EDITOR: 'screenshot-editor', // owner: @veryayskiy #team-replay
-    ACTIVITY_OR_EXPLORE: 'activity-or-explore', // owner: @pauldambra #team-replay
     EXPERIMENTS_NEW_QUERY_RUNNER_FOR_USERS_ON_FREE_PLAN: 'experiments-new-query-runner-for-users-on-free-plan', // owner: #team-experiments
     LINEAGE_DEPENDENCY_VIEW: 'lineage-dependency-view', // owner: @phixMe #team-data-warehouse
     TRACK_MEMORY_USAGE: 'track-memory-usage', // owner: @pauldambra #team-replay
     EXPERIMENTS_FREQUENTIST: 'experiments-frequentist', // owner: @jurajmajerik #team-experiments
-    TAXONOMIC_EVENT_SORTING: 'taxonomic-event-sorting', // owner: @pauldambra #team-replay
     SQL_EDITOR_TREE_VIEW: 'sql-editor-tree-view', // owner: @EDsCODE #team-data-warehouse
     AI_HOG_FUNCTION_CREATION: 'ai-hog-function-creation', // owner: @meikel #team-cdp
     REPLAY_FILTERS_IN_PLAYLIST: 'replay-filters-in-playlist', // owner: @veryayskiy #team-replay

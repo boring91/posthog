@@ -476,7 +476,7 @@ const EventContent = React.memo(({ event }: { event: LLMTrace | LLMTraceEvent | 
                             {hasSessionID(event) && (
                                 <div className="flex flex-row items-center gap-2">
                                     <Link
-                                        to={urls.replay(undefined, undefined, getSessionID(event) ?? '')}
+                                        to={urls.replaySingle(getSessionID(event) ?? '')}
                                         className="flex flex-row gap-1 items-center"
                                     >
                                         <IconOpenInNew />

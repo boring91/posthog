@@ -475,14 +475,12 @@ const EventContent = React.memo(({ event }: { event: LLMTrace | LLMTraceEvent | 
                                 </LemonButton>
                             )}
                             {hasSessionID(event) && (
-                                <div className="flex flex-row items-center gap-2">
-                                    <ViewRecordingButton
-                                        fullWidth
-                                        inModal
-                                        sessionId={getSessionID(event) || undefined}
-                                        timestamp={removeMilliseconds(event.createdAt)}
-                                    />
-                                </div>
+                                <ViewRecordingButton
+                                    fullWidth
+                                    inModal
+                                    sessionId={getSessionID(event) || undefined}
+                                    timestamp={removeMilliseconds(event.createdAt)}
+                                />
                             )}
                         </div>
                     </header>

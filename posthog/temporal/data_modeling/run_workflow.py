@@ -1,9 +1,9 @@
 import asyncio
+import collections
 import collections.abc
 import dataclasses
 import datetime as dt
 import enum
-import itertools
 import json
 import os
 import re
@@ -18,6 +18,7 @@ import temporalio.activity
 import temporalio.common
 import temporalio.exceptions
 import temporalio.workflow
+from temporalio import workflow
 from deltalake import DeltaTable
 from django.conf import settings
 from dlt.common.libs.deltalake import get_delta_tables
@@ -32,7 +33,6 @@ from posthog.settings.base_variables import TEST
 from posthog.temporal.common.base import PostHogWorkflow
 from posthog.temporal.common.heartbeat import Heartbeater
 from posthog.temporal.data_imports.util import prepare_s3_files_for_querying
-from posthog.temporal.data_modeling.metrics import get_data_modeling_finished_metric
 from posthog.warehouse.data_load.create_table import create_table_from_saved_query
 from posthog.warehouse.models import (
     DataWarehouseModelPath,
@@ -41,6 +41,7 @@ from posthog.warehouse.models import (
 )
 from posthog.warehouse.models.data_modeling_job import DataModelingJob
 from posthog.warehouse.util import database_sync_to_async
+from posthog.warehouse.api.lineage import get_upstream_dag
 
 logger = structlog.get_logger()
 
@@ -156,120 +157,6 @@ Results = collections.namedtuple("Results", ("completed", "failed", "ancestor_fa
 NullablePattern = re.compile(r"Nullable\((.*)\)")
 
 
-@temporalio.activity.defn
-async def run_dag_activity(inputs: RunDagActivityInputs) -> Results:
-    """A Temporal activity to run a data modeling DAG.
-
-    First, let's establish some definitions:
-    * "Running a model" means:
-      1. Executing the model's query (which is always a `SELECT` query).
-      2. Save query results as a delta lake table in S3 ("materialize the results").
-      Both steps are achieved with a dlt pipeline.
-    * A model is considered "ready to run" if all of its ancestors have successfully ran
-      already or if it has no ancestors.
-    * PostHog tables (e.g. events, persons, sessions) are assumed to be always available
-      and up to date, and thus can be considered to have ran successfully.
-
-    This activity runs the following algorithm:
-    1. Initialize 3 sets: completed, failed, and ancestor failed.
-    2. Initialize a queue for models and statuses.
-    3. Populate it with any models without parents set to status `ModelStatus.READY`.
-    4. Start a loop.
-    5. Pop an item from the queue and check the status:
-       a. If it's `ModelStatus.READY`, schedule a task to run the model. Once the task is
-          done, report back results by putting the same model with a
-          `ModelStatus.COMPLETED` or `ModelStatus.FAILED` in the queue.
-       b. If it's `ModelStatus.COMPLETED`, add the model to the completed set. Also, check
-          if any of the model's children have become ready to run, by checking if all of
-          their parents are in the completed set. Put any children that pass this check in
-          status `ModelStatus.READY` in the queue.
-       c. If it's `ModelStatus.FAILED`, add the model to the failed set. Also, add all
-          descendants of the model that just failed to the ancestor failed set.
-    6. If the number of models in the completed, failed, and ancestor failed sets is equal
-       to the total number of models passed to this activity, exit the loop. Else, goto 5.
-    """
-    completed = set()
-    ancestor_failed = set()
-    failed = set()
-    queue: asyncio.Queue[QueueMessage] = asyncio.Queue()
-
-    for node in inputs.dag.values():
-        if not node.parents:
-            queue.put_nowait(QueueMessage(status=ModelStatus.READY, label=node.label))
-
-    if queue.empty():
-        raise asyncio.QueueEmpty()
-
-    running_tasks = set()
-
-    async with Heartbeater():
-        while True:
-            message = await queue.get()
-            match message:
-                case QueueMessage(status=ModelStatus.READY, label=label):
-                    model = inputs.dag[label]
-                    task = asyncio.create_task(handle_model_ready(model, inputs.team_id, queue, inputs.job_id))
-                    running_tasks.add(task)
-                    task.add_done_callback(running_tasks.discard)
-
-                case QueueMessage(status=ModelStatus.COMPLETED, label=label):
-                    node = inputs.dag[label]
-                    completed.add(node.label)
-
-                    to_queue = []
-                    for child_label in node.children:
-                        child_node = inputs.dag[child_label]
-
-                        if completed >= child_node.parents:
-                            to_queue.append(child_node)
-
-                    task = asyncio.create_task(put_models_in_queue(to_queue, queue))
-                    running_tasks.add(task)
-                    task.add_done_callback(running_tasks.discard)
-
-                    queue.task_done()
-
-                case QueueMessage(status=ModelStatus.FAILED, label=label):
-                    node = inputs.dag[label]
-                    failed.add(node.label)
-
-                    to_mark_as_ancestor_failed = list(node.children)
-                    marked = set()
-                    while to_mark_as_ancestor_failed:
-                        to_mark = to_mark_as_ancestor_failed.pop()
-                        ancestor_failed.add(to_mark)
-                        marked.add(to_mark)
-
-                        marked_node = inputs.dag[to_mark]
-                        for child in marked_node.children:
-                            if child in marked:
-                                continue
-
-                            to_mark_as_ancestor_failed.append(child)
-
-                    queue.task_done()
-
-                case message:
-                    raise ValueError(f"Queue received an invalid message: {message}")
-
-            if len(failed) + len(ancestor_failed) + len(completed) == len(inputs.dag):
-                break
-
-        return Results(completed, failed, ancestor_failed)
-
-
-async def put_models_in_queue(models: collections.abc.Iterable[ModelNode], queue: asyncio.Queue[QueueMessage]) -> None:
-    """Put models in queue.
-
-    Intended to handle the queue put calls in the background to avoid blocking the main thread.
-    We wait for all models to be put into the queue, concurrently, in a `asyncio.TaskGroup`.
-    """
-
-    async with asyncio.TaskGroup() as tg:
-        for model in models:
-            tg.create_task(queue.put(QueueMessage(status=ModelStatus.READY, label=model.label)))
-
-
 class CHQueryErrorMemoryLimitExceeded(Exception):
     """Exception raised when a ClickHouse query exceeds memory limits."""
 
@@ -301,7 +188,10 @@ async def handle_model_ready(model: ModelNode, team_id: int, queue: asyncio.Queu
             saved_query = await get_saved_query(team, model.label)
             job = await database_sync_to_async(DataModelingJob.objects.get)(id=job_id)
 
-            key, delta_table, _ = await materialize_model(model.label, team, saved_query, job)
+            # Only materialize the current node, no upstream logic
+            saved_query.progress = f"Updating current view..."
+            await database_sync_to_async(saved_query.save)()
+            key, delta_table, _ = await materialize_model(model.label, team, saved_query, job, False)
     except CHQueryErrorMemoryLimitExceeded as err:
         await logger.aexception("Memory limit exceeded for model %s", model.label, job_id=job_id)
         await handle_error(job, model, queue, err, "Memory limit exceeded for model %s: %s")
@@ -319,9 +209,11 @@ async def handle_model_ready(model: ModelNode, team_id: int, queue: asyncio.Queu
         await handle_error(job, model, queue, err, "Failed to materialize model %s due to error: %s")
     else:
         await logger.ainfo("Materialized model %s", model.label)
-        await queue.put(QueueMessage(status=ModelStatus.COMPLETED, label=model.label))
+        if queue:
+            await queue.put(QueueMessage(status=ModelStatus.COMPLETED, label=model.label))
     finally:
-        queue.task_done()
+        if queue:
+            queue.task_done()
 
 
 async def handle_error(
@@ -378,7 +270,7 @@ async def get_saved_query(team: Team, model_label: str) -> DataWarehouseSavedQue
 
 
 async def materialize_model(
-    model_label: str, team: Team, saved_query: DataWarehouseSavedQuery, job: DataModelingJob
+    model_label: str, team: Team, saved_query: DataWarehouseSavedQuery, job: DataModelingJob, is_upstream: bool
 ) -> tuple[str, DeltaTable, uuid.UUID]:
     """Materialize a given model by running its query in a dlt pipeline.
 
@@ -472,11 +364,12 @@ async def materialize_model(
     row_count = count_pipeline_rows(pipeline)
     await update_table_row_count(saved_query, row_count)
 
-    # Update the job record with the row count and completed status
-    job.rows_materialized = row_count
-    job.status = DataModelingJob.Status.COMPLETED
-    job.last_run_at = dt.datetime.now(dt.UTC)
-    await database_sync_to_async(job.save)()
+    # Update the job record with the row count and completed status if we are updating the current model
+    if not is_upstream:
+        job.rows_materialized = row_count
+        job.status = DataModelingJob.Status.COMPLETED
+        job.last_run_at = dt.datetime.now(dt.UTC)
+        await database_sync_to_async(job.save)()
 
     return (key, delta_table, job.id)
 
@@ -730,7 +623,8 @@ async def get_posthog_tables(team_id: int) -> list[str]:
 
 @dataclasses.dataclass
 class StartRunActivityInputs:
-    dag: DAG
+    models_to_run: list[str]
+    root_model_id: str
     run_at: str
     team_id: int
 
@@ -740,6 +634,33 @@ class StartRunActivityInputs:
             "team_id": self.team_id,
             "run_at": self.run_at,
         }
+
+
+@dataclasses.dataclass
+class CreateJobsForMaterializedViewsActivityInputs:
+    team_id: int
+    materialized_view_ids: list[str]
+
+
+@temporalio.activity.defn
+async def create_jobs_for_materialized_views_activity(
+    inputs: CreateJobsForMaterializedViewsActivityInputs,
+) -> dict[str, str]:
+    team = await database_sync_to_async(Team.objects.get)(id=inputs.team_id)
+    workflow_id = temporalio.activity.info().workflow_id
+    workflow_run_id = temporalio.activity.info().workflow_run_id
+
+    jobs = {}
+    for model_id in inputs.materialized_view_ids:
+        saved_query = await get_saved_query(team, model_id)
+        job = await start_job_modeling_run(
+            team=team,
+            workflow_id=workflow_id,
+            workflow_run_id=workflow_run_id,
+            saved_query=saved_query,
+        )
+        jobs[model_id] = str(job.id)
+    return jobs
 
 
 @dataclasses.dataclass
@@ -770,12 +691,19 @@ async def start_run_activity(inputs: StartRunActivityInputs) -> None:
 
     try:
         async with asyncio.TaskGroup() as tg:
-            for label, model in inputs.dag.items():
-                if model.selected is False:
-                    continue
+            for label in inputs.models_to_run:
+                progress = None
+                if label == inputs.root_model_id and len(inputs.models_to_run) > 1:
+                    progress = "Updating upstream view(s)..."
 
                 tg.create_task(
-                    update_saved_query_status(label, DataWarehouseSavedQuery.Status.RUNNING, None, inputs.team_id)
+                    update_saved_query_status(
+                        label,
+                        DataWarehouseSavedQuery.Status.RUNNING,
+                        None,
+                        inputs.team_id,
+                        progress=progress,
+                    )
                 )
     except* Exception:
         await logger.aexception("Failed to update saved query status when starting run")
@@ -806,12 +734,16 @@ async def finish_run_activity(inputs: FinishRunActivityInputs) -> None:
         async with asyncio.TaskGroup() as tg:
             for label in inputs.completed:
                 tg.create_task(
-                    update_saved_query_status(label, DataWarehouseSavedQuery.Status.COMPLETED, run_at, inputs.team_id)
+                    update_saved_query_status(
+                        label, DataWarehouseSavedQuery.Status.COMPLETED, run_at, inputs.team_id, progress=""
+                    )
                 )
 
             for label in inputs.failed:
                 tg.create_task(
-                    update_saved_query_status(label, DataWarehouseSavedQuery.Status.FAILED, None, inputs.team_id)
+                    update_saved_query_status(
+                        label, DataWarehouseSavedQuery.Status.FAILED, None, inputs.team_id, progress=""
+                    )
                 )
     except* Exception:
         await logger.aexception("Failed to update saved query status when finishing run")
@@ -837,8 +769,13 @@ async def create_table_activity(inputs: CreateTableActivityInputs) -> None:
         await create_table_from_saved_query(model, inputs.team_id)
 
 
+@temporalio.activity.defn
 async def update_saved_query_status(
-    label: str, status: DataWarehouseSavedQuery.Status, run_at: typing.Optional[dt.datetime], team_id: int
+    label: str,
+    status: DataWarehouseSavedQuery.Status,
+    run_at: typing.Optional[dt.datetime],
+    team_id: int,
+    progress: typing.Optional[str] = None,
 ):
     filter_params: dict[str, int | str | uuid.UUID] = {"team_id": team_id}
 
@@ -855,6 +792,9 @@ async def update_saved_query_status(
     if run_at:
         saved_query.last_run_at = run_at
     saved_query.status = status
+
+    if progress is not None:
+        saved_query.progress = progress
 
     await database_sync_to_async(saved_query.save)()
 
@@ -910,6 +850,18 @@ class RunWorkflowInputs:
         }
 
 
+@temporalio.activity.defn
+async def run_single_model_activity(inputs: RunDagActivityInputs, label: str) -> str:
+    """Runs a single materialized view node."""
+    model = inputs.dag[label]
+    try:
+        # We don't need the queue param here
+        await handle_model_ready(model, inputs.team_id, None, inputs.job_id)
+        return "completed"
+    except Exception:
+        return "failed"
+
+
 @temporalio.workflow.defn(name="data-modeling-run")
 class RunWorkflow(PostHogWorkflow):
     """A Temporal Workflow to run PostHog data models.
@@ -926,15 +878,60 @@ class RunWorkflow(PostHogWorkflow):
 
     @temporalio.workflow.run
     async def run(self, inputs: RunWorkflowInputs) -> Results:
-        job_id = await temporalio.workflow.execute_activity(
-            create_job_model_activity,
-            CreateJobModelInputs(team_id=inputs.team_id, select=inputs.select),
+        # Get the upstream DAG for the root model, the most downstream model in the DAG
+        root_model_id = inputs.select[0].label
+        upstream = await temporalio.workflow.execute_activity(
+            get_upstream_dag_activity,
+            args=(inputs.team_id, root_model_id),
+            start_to_close_timeout=dt.timedelta(seconds=30),
+            retry_policy=temporalio.common.RetryPolicy(maximum_attempts=3),
+        )
+
+        # Only consider materialized views that should be run
+        mat_views = [node for node in upstream["nodes"] if node["type"] == "view" and node.get("sync_frequency")]
+        mat_view_ids = {node["id"] for node in mat_views}
+
+        jobs_map = await temporalio.workflow.execute_activity(
+            create_jobs_for_materialized_views_activity,
+            CreateJobsForMaterializedViewsActivityInputs(
+                team_id=inputs.team_id, materialized_view_ids=list(mat_view_ids)
+            ),
             start_to_close_timeout=dt.timedelta(minutes=5),
             retry_policy=temporalio.common.RetryPolicy(
                 maximum_attempts=1,
             ),
         )
 
+        # Build full dependency graph
+        all_deps: dict[str, set[str]] = collections.defaultdict(set)
+        for edge in upstream["edges"]:
+            all_deps[edge["target"]].add(edge["source"])
+
+        # For each materialized view, find its materialized dependencies, traversing through non-materialized views
+        dependencies = {node_id: set() for node_id in mat_view_ids}
+        dependents: dict[str, set[str]] = collections.defaultdict(set)
+        for node_id in mat_view_ids:
+            q = collections.deque(list(all_deps.get(node_id, [])))
+            visited = set(q)
+            while q:
+                dep = q.popleft()
+                if dep in mat_view_ids:
+                    dependencies[node_id].add(dep)
+                    dependents[dep].add(node_id)
+                else:
+                    # If the dependency is not a materialized view (e.g. another view, or a table), look at its dependencies
+                    for grand_dep in all_deps.get(dep, []):
+                        if grand_dep not in visited:
+                            visited.add(grand_dep)
+                            q.append(grand_dep)
+
+        completed = set()
+        failed = set()
+        ancestor_failed = set()
+        running = {}
+        ready = [node_id for node_id, deps in dependencies.items() if not deps]
+
+        inputs.select[0] = dataclasses.replace(inputs.select[0], ancestors="ALL")
         build_dag_inputs = BuildDagActivityInputs(team_id=inputs.team_id, select=inputs.select)
         dag = await temporalio.workflow.execute_activity(
             build_dag_activity,
@@ -950,7 +947,9 @@ class RunWorkflow(PostHogWorkflow):
 
         run_at = dt.datetime.now(dt.UTC).isoformat()
 
-        start_run_activity_inputs = StartRunActivityInputs(dag=dag, run_at=run_at, team_id=inputs.team_id)
+        start_run_activity_inputs = StartRunActivityInputs(
+            models_to_run=list(mat_view_ids), root_model_id=root_model_id, run_at=run_at, team_id=inputs.team_id
+        )
         await temporalio.workflow.execute_activity(
             start_run_activity,
             start_run_activity_inputs,
@@ -962,101 +961,95 @@ class RunWorkflow(PostHogWorkflow):
             ),
         )
 
-        # Run the DAG
-        run_model_activity_inputs = RunDagActivityInputs(team_id=inputs.team_id, dag=dag, job_id=job_id)
-        try:
-            results = await temporalio.workflow.execute_activity(
-                run_dag_activity,
-                run_model_activity_inputs,
-                start_to_close_timeout=dt.timedelta(hours=1),
-                heartbeat_timeout=dt.timedelta(minutes=1),
-                retry_policy=temporalio.common.RetryPolicy(
-                    maximum_attempts=1,
-                ),
-                cancellation_type=temporalio.workflow.ActivityCancellationType.TRY_CANCEL,
-            )
-        except temporalio.exceptions.ActivityError as e:
-            if isinstance(e.cause, temporalio.exceptions.CancelledError):
-                workflow_id = temporalio.workflow.info().workflow_id
-                workflow_run_id = temporalio.workflow.info().run_id
+        while ready or running:
+            for node_id in ready:
+                run_dag_inputs = RunDagActivityInputs(team_id=inputs.team_id, dag=dag, job_id=jobs_map[node_id])
+                fut = workflow.start_activity(
+                    run_single_model_activity,
+                    args=(run_dag_inputs, node_id),
+                    start_to_close_timeout=dt.timedelta(hours=1),
+                    heartbeat_timeout=dt.timedelta(minutes=5),
+                    retry_policy=temporalio.common.RetryPolicy(maximum_attempts=1),
+                )
+                running[node_id] = fut
+            ready = []
+
+            if not running:
+                break
+
+            # Wait for any activity to complete
+            await workflow.wait_condition(lambda: any(fut.done() for fut in running.values()))
+
+            # Process all completed activities in this batch
+            done_labels = [label for label, fut in running.items() if fut.done()]
+
+            for done_label in done_labels:
+                if done_label not in running:
+                    continue  # Already handled as a descendant of a failed node
+
+                fut = running.pop(done_label)
+                is_success = False
                 try:
-                    await temporalio.workflow.execute_activity(
-                        cancel_jobs_activity,
-                        CancelJobsActivityInputs(
-                            workflow_id=workflow_id, workflow_run_id=workflow_run_id, team_id=inputs.team_id
-                        ),
-                        start_to_close_timeout=dt.timedelta(minutes=5),
-                        retry_policy=temporalio.common.RetryPolicy(
-                            maximum_attempts=3,
-                        ),
-                    )
-                except Exception as cancel_err:
-                    capture_exception(cancel_err)
-                    temporalio.workflow.logger.error(f"Failed to cancel jobs: {str(cancel_err)}")
-                    raise
-                raise
+                    status = await fut
+                    if status == "completed":
+                        is_success = True
+                except temporalio.exceptions.ActivityError:
+                    pass  # is_success remains False
 
-            capture_exception(e)
-            temporalio.workflow.logger.error(f"Activity failed during model run: {str(e)}")
+                if is_success:
+                    completed.add(done_label)
+                    # Check for new ready dependents
+                    for dependent in dependents.get(done_label, set()):
+                        if dependencies.get(dependent, set()).issubset(completed):
+                            # It's ready, but might have been added to ready/running via another parent
+                            if dependent not in running and dependent not in ready:
+                                ready.append(dependent)
+                else:
+                    failed.add(done_label)
+                    # Mark all descendants as ancestor_failed
+                    q = collections.deque(list(dependents.get(done_label, set())))
+                    while q:
+                        descendant = q.popleft()
+                        if descendant not in ancestor_failed:
+                            ancestor_failed.add(descendant)
+                            if descendant in running:
+                                # We can't cancel, but we can untrack it to prevent it from being processed
+                                del running[descendant]
+                            q.extend(list(dependents.get(descendant, set())))
 
-            await temporalio.workflow.execute_activity(
-                fail_jobs_activity,
-                FailJobsActivityInputs(job_id=job_id, error=str(e)),
-                start_to_close_timeout=dt.timedelta(minutes=5),
-                retry_policy=temporalio.common.RetryPolicy(
-                    maximum_attempts=3,
-                ),
-            )
-            raise
-        except Exception as e:
-            await temporalio.workflow.execute_activity(
-                fail_jobs_activity,
-                FailJobsActivityInputs(job_id=job_id, error=str(e)),
-                start_to_close_timeout=dt.timedelta(minutes=5),
-                retry_policy=temporalio.common.RetryPolicy(
-                    maximum_attempts=3,
-                ),
-            )
-            raise
-
-        completed, failed, ancestor_failed = results
-
-        # publish metrics
-        if failed or ancestor_failed:
-            get_data_modeling_finished_metric(status="failed").add(1)
-        elif completed:
-            get_data_modeling_finished_metric(status="completed").add(1)
-
-        selected_labels = [selector.label for selector in inputs.select]
-        create_table_activity_inputs = CreateTableActivityInputs(
-            models=[label for label in completed if label in selected_labels], team_id=inputs.team_id
-        )
+        # Create tables for all materialized views in the DAG
         await temporalio.workflow.execute_activity(
             create_table_activity,
-            create_table_activity_inputs,
+            CreateTableActivityInputs(models=list(mat_view_ids), team_id=inputs.team_id),
             start_to_close_timeout=dt.timedelta(minutes=5),
             retry_policy=temporalio.common.RetryPolicy(
-                initial_interval=dt.timedelta(seconds=10),
-                maximum_interval=dt.timedelta(seconds=60),
                 maximum_attempts=1,
             ),
         )
 
-        finish_run_activity_inputs = FinishRunActivityInputs(
-            completed=[label for label in completed if dag[label].selected is True],
-            failed=[label for label in itertools.chain(failed, ancestor_failed) if dag[label].selected is True],
-            run_at=run_at,
-            team_id=inputs.team_id,
-        )
         await temporalio.workflow.execute_activity(
             finish_run_activity,
-            finish_run_activity_inputs,
-            start_to_close_timeout=dt.timedelta(minutes=5),
-            retry_policy=temporalio.common.RetryPolicy(
-                initial_interval=dt.timedelta(seconds=10),
-                maximum_interval=dt.timedelta(seconds=60),
-                maximum_attempts=1,
+            FinishRunActivityInputs(
+                completed=list(completed),
+                failed=list(failed | ancestor_failed),
+                run_at=temporalio.workflow.now().isoformat(),
+                team_id=inputs.team_id,
             ),
+            start_to_close_timeout=dt.timedelta(minutes=5),
+            retry_policy=temporalio.common.RetryPolicy(maximum_attempts=1),
         )
 
-        return results
+        return Results(
+            serialize_set(completed),
+            serialize_set(failed),
+            serialize_set(ancestor_failed),
+        )
+
+
+@temporalio.activity.defn
+def get_upstream_dag_activity(team_id: int, model_id: str) -> dict:
+    return get_upstream_dag(team_id, model_id, should_stringify_numerics=True)
+
+
+def serialize_set(s):
+    return {x.isoformat() if isinstance(x, dt.datetime) else x for x in s}

@@ -4498,6 +4498,7 @@ export interface DataWarehouseSavedQuery {
     last_run_at?: string
     sync_frequency: string
     status?: string
+    progress?: string
     latest_error: string | null
     latest_history_id?: string
 }

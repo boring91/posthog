@@ -477,9 +477,10 @@ const EventContent = React.memo(({ event }: { event: LLMTrace | LLMTraceEvent | 
                             {hasSessionID(event) && (
                                 <div className="flex flex-row items-center gap-2">
                                     <ViewRecordingButton
+                                        fullWidth
+                                        inModal
                                         sessionId={getSessionID(event) || undefined}
                                         timestamp={removeMilliseconds(event.createdAt)}
-                                        size="small"
                                     />
                                 </div>
                             )}

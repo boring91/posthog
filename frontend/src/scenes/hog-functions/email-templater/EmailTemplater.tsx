@@ -6,6 +6,7 @@ import { LemonField } from 'lib/lemon-ui/LemonField'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { CodeEditorInline } from 'lib/monaco/CodeEditorInline'
 import { capitalizeFirstLetter } from 'lib/utils'
+import { getAppContext } from 'lib/utils/getAppContext'
 import EmailEditor from 'react-email-editor'
 
 import { emailTemplaterLogic, EmailTemplaterLogicProps } from './emailTemplaterLogic'
@@ -82,6 +83,7 @@ function EmailTemplaterForm({ mode }: { mode: 'full' | 'preview' }): JSX.Element
                                 imageEditor: true,
                                 stockImages: false,
                             },
+                            projectId: getAppContext()?.unlayer_editor_project_id,
                         }}
                     />
                 ) : (

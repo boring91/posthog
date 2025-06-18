@@ -476,10 +476,12 @@ const EventContent = React.memo(({ event }: { event: LLMTrace | LLMTraceEvent | 
                             )}
                             {hasSessionID(event) && (
                                 <ViewRecordingButton
-                                    fullWidth
                                     inModal
                                     sessionId={getSessionID(event) || undefined}
                                     timestamp={removeMilliseconds(event.createdAt)}
+                                    type="secondary"
+                                    size="xsmall"
+                                    data-attr="llm-observability"
                                 />
                             )}
                         </div>

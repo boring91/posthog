@@ -1246,18 +1246,32 @@ class ConsumerFromStage:
 
                 # Transform batch to chunks
                 # We also split the file if we reach the max file size
+                num_rows = record_batch.num_rows
                 for chunk in transformer.transform_batch(record_batch):
                     await self.consume_chunk(data=chunk)
-                    current_file_size += len(chunk)
+
+                    chunk_size = len(chunk)
+                    current_file_size += chunk_size
+                    self.bytes_exported_counter.add(chunk_size)
+
                     if max_file_size_bytes and current_file_size > max_file_size_bytes:
                         for chunk in transformer.finalize():
                             await self.consume_chunk(chunk)
-                        await self.finalize_file()
-                        current_file_size = 0
 
-            # Finalize transformer and consume any remaining data
+                            chunk_size = len(chunk)
+                            self.bytes_exported_counter.add(chunk_size)
+
+                        await self.finalize_file()
+
+                        current_file_size = 0
+                self.rows_exported_counter.add(num_rows)
+
+            # Finalize transformer and consume any remaining data (eg file metadata)
             for chunk in transformer.finalize():
                 await self.consume_chunk(chunk)
+
+                chunk_size = len(chunk)
+                self.bytes_exported_counter.add(chunk_size)
 
             # Finalize upload
             await self.finalize()

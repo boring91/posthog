@@ -1,13 +1,25 @@
 // This should eventually be moved to a DB.
+import { createExampleOverlay } from './createExampleOverlay'
+
+export interface SeeMoreOptions {
+    arrowIcon?: 'right' | 'up'
+    backgroundColor?: 'black' | 'white'
+    hideDefaultClose?: boolean
+    text?: string
+    textColor?: 'black' | 'white'
+}
+
 export interface story {
     id: string
     title: string
     thumbnailUrl: string
     description?: string
-    mediaUrl: string
-    type: 'image' | 'video'
+    mediaUrl?: string
+    type: 'image' | 'video' | 'overlay'
     durationMs?: number
-    link?: string
+    seeMoreLink?: string
+    seeMoreOverlay?: (closeOverlay: (action?: 'overlay' | 'modal' | 'next' | 'previous') => void) => JSX.Element
+    seeMoreOptions?: SeeMoreOptions
 }
 
 export interface storyGroup {
@@ -32,7 +44,6 @@ export const storiesMap: storyGroup[] = [
                 mediaUrl:
                     'https://res.cloudinary.com/dmukukwp6/video/upload/changelog_save_filters_replay_wide_684b8b7844_82b2ffd07c.mp4',
                 type: 'video',
-                durationMs: 29000,
             },
             {
                 id: 'changelog_linear_share_1',
@@ -42,16 +53,38 @@ export const storiesMap: storyGroup[] = [
                 mediaUrl:
                     'https://res.cloudinary.com/dmukukwp6/video/upload/changelog_linear_share_wide_0d3520bba5_64049c56b6.mp4',
                 type: 'video',
-                durationMs: 44000,
+            },
+            {
+                id: 'overlay_example',
+                title: 'Changelog',
+                description: 'New feature showcase with component overlay',
+                thumbnailUrl: 'https://res.cloudinary.com/dmukukwp6/image/upload/hoggie_phone_9f7523e1a8.png',
+                mediaUrl: 'https://res.cloudinary.com/dmukukwp6/image/upload/changelog_cta_f8c6037283.png',
+                type: 'image',
+                durationMs: 6000,
+                seeMoreOverlay: createExampleOverlay('🚀 Feature Showcase', "See what's new in PostHog", [
+                    'Advanced analytics',
+                    'Real-time insights',
+                    'Custom dashboards',
+                ]),
+                seeMoreOptions: {
+                    text: 'Explore Feature',
+                    textColor: 'black',
+                    backgroundColor: 'black',
+                    arrowIcon: 'up',
+                },
             },
             {
                 id: 'changelog_cta',
                 title: 'Changelog',
                 description: 'Read our changelog!',
                 thumbnailUrl: 'https://res.cloudinary.com/dmukukwp6/image/upload/hoggie_phone_9f7523e1a8.png',
-                mediaUrl: 'https://res.cloudinary.com/dmukukwp6/image/upload/changelog_cta_f8c6037283.png',
-                type: 'image',
-                durationMs: 5500,
+                mediaUrl: 'https://res.cloudinary.com/dmukukwp6/video/upload/placeholder_hogtok_743c5dde0e.mp4',
+                type: 'video',
+                seeMoreLink: 'https://posthog.com/changelog',
+                seeMoreOptions: {
+                    backgroundColor: 'black',
+                },
             },
         ],
     },

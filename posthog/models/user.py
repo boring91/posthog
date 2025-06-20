@@ -59,6 +59,14 @@ class UserManager(BaseUserManager):
 
     use_in_migrations = True
 
+    def normalize_email(self, email: str) -> str:
+        """
+        Custom normalize_email that lowercases the entire email address.
+        """
+        email = email or ""
+
+        return email.lower().strip()
+
     def create_user(self, email: str, password: Optional[str], first_name: str, **extra_fields) -> "User":
         """Create and save a User with the given email and password."""
         if email is None:
@@ -70,6 +78,12 @@ class UserManager(BaseUserManager):
             user.set_password(password)
         user.save()
         return user
+
+    def get_by_natural_key(self, username: str) -> "User":
+        """
+        Enable case-insensitive authentication by email.
+        """
+        return self.get(email__iexact=username)
 
     def bootstrap(
         self,
@@ -114,6 +128,7 @@ class UserManager(BaseUserManager):
         **extra_fields,
     ) -> "User":
         with transaction.atomic():
+            email = self.normalize_email(email)
             user = self.create_user(email=email, password=password, first_name=first_name, **extra_fields)
             user.join(organization=organization, level=level)
             return user

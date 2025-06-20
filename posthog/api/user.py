@@ -304,14 +304,15 @@ class UserSerializer(serializers.ModelSerializer):
             validated_data["current_team"] = current_team
             validated_data["current_organization"] = current_team.organization
 
-        if (
-            "email" in validated_data
-            and validated_data["email"].lower() != instance.email.lower()
-            and is_email_available()
-        ):
-            instance.pending_email = validated_data.pop("email", None)
-            instance.save()
-            EmailVerifier.create_token_and_send_email_verification(instance)
+        if "email" in validated_data and is_email_available():
+            normalized_current_email = User.objects.normalize_email(instance.email)
+            normalized_new_email = User.objects.normalize_email(validated_data["email"])
+
+            if normalized_new_email != normalized_current_email:
+                instance.pending_email = normalized_new_email
+                validated_data.pop("email", None)  # Remove from validated_data to prevent direct update
+                instance.save()
+                EmailVerifier.create_token_and_send_email_verification(instance)
 
         # Update password
         current_password = validated_data.pop("current_password", None)

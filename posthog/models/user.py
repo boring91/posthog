@@ -59,7 +59,7 @@ class UserManager(BaseUserManager):
 
     use_in_migrations = True
 
-    def normalize_email(self, email: str) -> str:
+    def normalize_email(self, email: str | None) -> str:
         """
         Custom normalize_email that lowercases the entire email address.
         """
@@ -79,10 +79,12 @@ class UserManager(BaseUserManager):
         user.save()
         return user
 
-    def get_by_natural_key(self, username: str) -> "User":
+    def get_by_natural_key(self, username: str | None):
         """
         Enable case-insensitive authentication by email.
         """
+        if username is None:
+            raise self.model.DoesNotExist("Username cannot be None")
         return self.get(email__iexact=username)
 
     def bootstrap(

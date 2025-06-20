@@ -44,6 +44,13 @@ class QueryTags(BaseModel):
     id: Optional[str] = None
     session_id: Optional[uuid.UUID] = None
 
+    # temporalio tags
+    workflow: Optional[str] = None
+    workflow_id: Optional[str] = None
+    workflow_run_id: Optional[str] = None
+    activity: Optional[str] = None
+    activity_id: Optional[str] = None
+
     query: Optional[object] = None
     query_settings: Optional[object] = None
     query_time_range_days: Optional[int] = None
@@ -173,7 +180,7 @@ def tag_queries(**kwargs) -> None:
         thread_local_storage.query_tags = create_base_tags(**kwargs)
 
 
-def clear_tag(key):
+def clear_tag(key: str):
     try:
         setattr(thread_local_storage.query_tags, key, None)
     except AttributeError:

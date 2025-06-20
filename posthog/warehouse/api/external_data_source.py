@@ -86,6 +86,7 @@ from posthog.warehouse.models.external_data_schema import (
     filter_snowflake_incremental_fields,
     get_postgres_row_count,
     get_sql_schemas_for_source_type,
+    get_mongo_schemas_for_source_type,
 )
 from posthog.warehouse.models.ssh_tunnel import SSHTunnel
 
@@ -496,6 +497,8 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
             new_source_model = self._handle_temporalio_source(request, *args, **kwargs)
         elif source_type == ExternalDataSource.Type.DOIT:
             new_source_model, doit_schemas = self._handle_doit_source(request, *args, **kwargs)
+        elif source_type == ExternalDataSource.Type.MONGO:
+            new_source_model, mongo_schemas = self._handle_mongo_source(request, *args, **kwargs)
         else:
             raise NotImplementedError(f"Source type {source_type} not implemented")
 
@@ -507,6 +510,8 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
             ExternalDataSource.Type.MSSQL,
         ]:
             default_schemas = sql_schemas
+        elif source_type == ExternalDataSource.Type.MONGO:
+            default_schemas = mongo_schemas
         elif source_type == ExternalDataSource.Type.SNOWFLAKE:
             default_schemas = snowflake_schemas
         elif source_type == ExternalDataSource.Type.BIGQUERY:
@@ -926,6 +931,49 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
 
         config = GoogleAdsServiceAccountSourceConfig.from_dict({**new_source_model.job_inputs, **{"resource_name": ""}})
         schemas = get_google_ads_schemas(config)
+
+        return new_source_model, list(schemas.keys())
+
+    def _handle_mongo_source(self, request: Request, *args: Any, **kwargs: Any) -> tuple[ExternalDataSource, list[Any]]:
+        payload = request.data["payload"]
+        prefix = request.data.get("prefix", None)
+        source_type = request.data["source_type"]
+
+        connection_string = payload.get("connection_string")
+
+        if not connection_string:
+            raise Exception("Missing required parameter: connection_string")
+
+        # Parse connection string to validate and extract database for host validation
+        try:
+            from posthog.temporal.data_imports.pipelines.mongo.mongo import _parse_connection_string
+
+            connection_params = _parse_connection_string(connection_string)
+        except Exception as e:
+            raise Exception(f"Invalid connection string: {str(e)}")
+
+        if not connection_params.get("database"):
+            raise Exception("Database name is required in connection string")
+
+        # Validate database host
+        if not self._validate_mongo_host(connection_params):
+            raise Exception("Cannot use internal database")
+
+        new_source_model = ExternalDataSource.objects.create(
+            source_id=str(uuid.uuid4()),
+            connection_id=str(uuid.uuid4()),
+            destination_id=str(uuid.uuid4()),
+            team=self.team,
+            created_by=request.user if isinstance(request.user, User) else None,
+            status="Running",
+            source_type=source_type,
+            job_inputs={
+                "connection_string": connection_string,
+            },
+            prefix=prefix,
+        )
+
+        schemas = get_mongo_schemas_for_source_type(new_source_model.job_inputs)
 
         return new_source_model, list(schemas.keys())
 
@@ -1367,6 +1415,81 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
                 for table_name, columns in filtered_results
             ]
             return Response(status=status.HTTP_200_OK, data=result_mapped_to_options)
+        elif source_type == ExternalDataSource.Type.MONGO:
+            from pymongo.errors import OperationFailure as MongoOperationFailure
+
+            connection_string = request.data.get("connection_string", None)
+
+            if not connection_string:
+                return Response(
+                    status=status.HTTP_400_BAD_REQUEST,
+                    data={"message": "Missing required parameter: connection_string"},
+                )
+
+            # Parse connection string to validate and extract parameters
+            try:
+                from posthog.temporal.data_imports.pipelines.mongo.mongo import _parse_connection_string
+
+                connection_params = _parse_connection_string(connection_string)
+            except Exception as e:
+                return Response(
+                    status=status.HTTP_400_BAD_REQUEST,
+                    data={"message": f"Invalid connection string: {str(e)}"},
+                )
+
+            if not connection_params.get("database"):
+                return Response(
+                    status=status.HTTP_400_BAD_REQUEST,
+                    data={"message": "Database name is required in connection string"},
+                )
+
+            # Validate internal database
+            if not self._validate_mongo_host(connection_params):
+                return Response(
+                    status=status.HTTP_400_BAD_REQUEST,
+                    data={"message": "Cannot use internal database"},
+                )
+
+            try:
+                result = get_mongo_schemas_for_source_type(
+                    {
+                        "connection_string": connection_string,
+                    }
+                )
+                if len(result.keys()) == 0:
+                    return Response(
+                        status=status.HTTP_400_BAD_REQUEST,
+                        data={"message": "No collections found in database"},
+                    )
+            except MongoOperationFailure as e:
+                return Response(
+                    status=status.HTTP_400_BAD_REQUEST,
+                    data={"message": f"MongoDB authentication failed: {str(e)}"},
+                )
+            except Exception as e:
+                capture_exception(e)
+                logger.exception("Could not fetch MongoDB collections", exc_info=e)
+
+                return Response(
+                    status=status.HTTP_400_BAD_REQUEST,
+                    data={"message": "Failed to connect to MongoDB database"},
+                )
+
+            filtered_results = [(collection_name, columns) for collection_name, columns in result.items()]
+
+            result_mapped_to_options = [
+                {
+                    "table": collection_name,
+                    "should_sync": False,
+                    "rows": None,  # MongoDB doesn't provide easy row count in schema discovery
+                    "incremental_fields": [],
+                    "incremental_available": False,
+                    "incremental_field": None,
+                    "sync_type": None,
+                }
+                for collection_name, _ in filtered_results
+            ]
+            return Response(status=status.HTTP_200_OK, data=result_mapped_to_options)
         elif source_type == ExternalDataSource.Type.SNOWFLAKE:
             account_id = request.data.get("account_id")
             database = request.data.get("database")
@@ -1555,6 +1678,13 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
             if key in error_msg:
                 return value
         return None
+
+    def _validate_mongo_host(self, connection_params: dict[str, Any]) -> bool:
+        """Validate MongoDB host for non-SRV connections."""
+        if connection_params.get("is_srv"):
+            return True  # SRV connections are always allowed
+
+        return self._validate_database_host(connection_params["host"], self.team_id, False)
 
     def _validate_database_host(self, host: str, team_id: int, using_ssh_tunnel: bool) -> bool:
         if using_ssh_tunnel:

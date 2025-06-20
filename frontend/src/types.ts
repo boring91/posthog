@@ -4548,7 +4548,7 @@ export const externalDataSources = [
     'Mailjet',
     'Redshift',
     'GoogleSheets',
-    'Mongodb',
+    'MongoDB',
     'TemporalIO',
     'DoIt',
 ] as const

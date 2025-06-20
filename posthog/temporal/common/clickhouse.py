@@ -17,6 +17,7 @@ import requests
 import structlog
 from django.conf import settings
 
+from posthog.clickhouse import query_tagging
 from posthog.exceptions_capture import capture_exception
 import posthog.temporal.common.asyncpa as asyncpa
 from posthog.temporal.common.logger import get_internal_logger
@@ -236,6 +237,12 @@ class ClickHouseQueryNotFound(ClickHouseError):
         super().__init__(query, f"Query with ID '{query_id}' was not found in query log")
 
 
+def update_with_log_comment(params):
+    query_tags = query_tagging.get_query_tags()
+    log_comment = query_tags.to_json()
+    params["log_comment"] = log_comment.encode("utf-8")
+
+
 class ClickHouseClient:
     """An asynchronous client to access ClickHouse via HTTP.
 
@@ -405,6 +412,8 @@ class ClickHouseClient:
                 if key in query:
                     params[f"param_{key}"] = str(value)
 
+        update_with_log_comment(params)
+
         async with self.session.get(url=self.url, headers=self.headers, params=params) as response:
             await self.acheck_response(response, query)
             yield response
@@ -444,6 +453,7 @@ class ClickHouseClient:
             for key, value in query_parameters.items():
                 if key in query:
                     params[f"param_{key}"] = str(value)
+        update_with_log_comment(params)
 
         request_data = self.prepare_request_data(data)
 
@@ -501,6 +511,7 @@ class ClickHouseClient:
             for key, value in query_parameters.items():
                 if key in query:
                     params[f"param_{key}"] = str(value)
+        update_with_log_comment(params)
 
         with requests.Session() as s:
             response = s.post(
@@ -548,11 +559,11 @@ class ClickHouseClient:
                 failed.
         """
         query = """
-        SELECT type, exception
-        FROM clusterAllReplicas({{cluster_name:String}}, system.query_log)
-        WHERE query_id = {{query_id:String}}
-        FORMAT JSONEachRow
-        """
+                SELECT type, exception
+                FROM clusterAllReplicas({{cluster_name:String}}, system.query_log)
+                WHERE query_id = {{query_id:String}}
+                    FORMAT JSONEachRow \
+                """
 
         resp = await self.read_query(
             query,

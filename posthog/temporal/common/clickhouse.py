@@ -16,6 +16,7 @@ import pyarrow as pa
 import requests
 import structlog
 from django.conf import settings
+from temporalio import activity
 
 from posthog.clickhouse import query_tagging
 from posthog.exceptions_capture import capture_exception
@@ -239,9 +240,18 @@ class ClickHouseQueryNotFound(ClickHouseError):
 
 def update_with_log_comment(params):
     query_tags = query_tagging.get_query_tags()
+    if activity.in_activity():
+        query_tags.kind = "temporal"
+        info = activity.info()
+        query_tags.workflow = info.workflow_type
+        query_tags.workflow_id = info.workflow_id
+        query_tags.workflow_run_id = info.workflow_run_id
+        query_tags.activity = info.activity_type
+        query_tags.activity_id = info.activity_id
     log_comment = query_tags.to_json()
-    safe_string = quote_plus(log_comment)
-    params["log_comment"] = safe_string
+    if log_comment != "{}":
+        safe_string = quote_plus(log_comment)
+        params["log_comment"] = safe_string
 
 
 class ClickHouseClient:

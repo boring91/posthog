@@ -44,6 +44,13 @@ class QueryTags(BaseModel):
     id: Optional[str] = None
     session_id: Optional[uuid.UUID] = None
 
+    # temporalio tags
+    workflow: Optional[str]
+    workflow_id: Optional[str]
+    workflow_run_id: Optional[str]
+    activity: Optional[str]
+    activity_id: Optional[str]
+
     query: Optional[object] = None
     query_settings: Optional[object] = None
     query_time_range_days: Optional[int] = None

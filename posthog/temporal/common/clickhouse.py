@@ -9,7 +9,7 @@ import typing
 import uuid
 import decimal
 import ipaddress
-from urllib.parse import urljoin
+from urllib.parse import urljoin, quote_plus
 
 import aiohttp
 import pyarrow as pa
@@ -240,7 +240,8 @@ class ClickHouseQueryNotFound(ClickHouseError):
 def update_with_log_comment(params):
     query_tags = query_tagging.get_query_tags()
     log_comment = query_tags.to_json()
-    params["log_comment"] = log_comment.encode("utf-8")
+    safe_string = quote_plus(log_comment)
+    params["log_comment"] = safe_string
 
 
 class ClickHouseClient:

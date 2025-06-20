@@ -173,7 +173,7 @@ def tag_queries(**kwargs) -> None:
         thread_local_storage.query_tags = create_base_tags(**kwargs)
 
 
-def clear_tag(key):
+def clear_tag(key: str):
     try:
         setattr(thread_local_storage.query_tags, key, None)
     except AttributeError:

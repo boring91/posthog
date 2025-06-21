@@ -1,7 +1,7 @@
 import { IconCheckbox, IconChevronRight, IconFolderPlus, IconPlusSmall, IconX } from '@posthog/icons'
 import { BindLogic, useActions, useValues } from 'kea'
 import { router } from 'kea-router'
-import { moveToLogic } from 'lib/components/MoveTo/moveToLogic'
+import { moveToLogic } from 'lib/components/FileSystem/MoveTo/moveToLogic'
 import { ResizableElement } from 'lib/components/ResizeElement/ResizeElement'
 import { dayjs } from 'lib/dayjs'
 import { LemonTag } from 'lib/lemon-ui/LemonTag'
@@ -115,7 +115,6 @@ export function ProjectTree({
     } = useActions(projectTreeLogic(projectTreeLogicProps))
     const { openMoveToModal } = useActions(moveToLogic)
     const { mobileLayout: isMobileLayout } = useValues(navigation3000Logic)
-
     const { showLayoutPanel, setPanelTreeRef, clearActivePanelIdentifier, showLayoutNavBar } =
         useActions(panelLayoutLogic)
     const { mainContentRef, isLayoutPanelPinned, isLayoutPanelVisible, isLayoutNavbarVisible } =

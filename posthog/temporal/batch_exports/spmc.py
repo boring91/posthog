@@ -51,9 +51,7 @@ from posthog.temporal.batch_exports.temporary_file import (
     WriterFormat,
     get_batch_export_writer,
 )
-from posthog.temporal.batch_exports.transformer import (
-    get_stream_transformer,
-)
+from posthog.temporal.batch_exports.transformer import get_stream_transformer
 from posthog.temporal.batch_exports.utils import (
     cast_record_batch_json_columns,
     cast_record_batch_schema_json_columns,
@@ -1205,9 +1203,14 @@ class ConsumerFromStage:
     ) -> int:
         """Start consuming record batches from queue.
 
-        Record batches will be written to a temporary file defined by `writer_format`
-        and the file will be flushed upon reaching at least `max_bytes`.
+        Record batches will be processed by the `transformer`, which transforms the record batch into chunks of bytes,
+        depending on the `file_format` and `compression`.
 
+        Each of these chunks will be consumed by the `consume_chunk` method, which is implemented by subclasses.
+
+        If `max_file_size_bytes` is set, we split the file into multiples if the file size exceeds this value.
+
+        # TODO - we may need to support `multiple_files` here in future.
         Callers can control whether a new file is created for each flush or whether we
         continue flushing to the same file by setting `multiple_files`. File data is
         reset regardless, so this is not meant to impact total file size, but rather
@@ -1225,31 +1228,28 @@ class ConsumerFromStage:
             schema=schema,
             include_inserted_at=include_inserted_at,
         )
-        record_batches_count = 0
-        records_count = 0
-        bytes_count = 0
+        num_records_in_batch = 0
+        num_bytes_in_batch = 0
+        total_record_batches_count = 0
+        total_records_count = 0
+        total_file_bytes_count = 0
 
         async def track_iteration_of_record_batches():
             """Wrap generator of record batches to track execution."""
-            nonlocal record_batches_count
-            nonlocal records_count
-            nonlocal bytes_count
+            nonlocal num_records_in_batch
+            nonlocal num_bytes_in_batch
+            nonlocal total_record_batches_count
+            nonlocal total_records_count
 
             async for record_batch in self.generate_record_batches_from_queue(queue, producer_task):
                 record_batch = cast_record_batch_json_columns(record_batch, json_columns=json_columns)
 
-                record_batches_count += 1
-                records_count += record_batch.num_rows
-                bytes_count += record_batch.nbytes
+                total_record_batches_count += 1
+                num_records_in_batch = record_batch.num_rows
+                total_records_count += num_records_in_batch
+                num_bytes_in_batch = record_batch.nbytes
 
-                await self.logger.adebug(
-                    "Consuming %s records, %s bytes from record batch %s; total records so far: %s, total MiB so far: %s",
-                    record_batch.num_rows,
-                    record_batch.nbytes,
-                    record_batches_count,
-                    records_count,
-                    bytes_count / 1024**2,
-                )
+                self.rows_exported_counter.add(num_records_in_batch)
 
                 yield record_batch
 
@@ -1262,9 +1262,21 @@ class ConsumerFromStage:
                     await self.finalize_file()
                     continue
 
-                await self.consume_chunk(data=chunk)
+                chunk_size = len(chunk)
+                total_file_bytes_count += chunk_size
 
-            # Finalize upload
+                await self.logger.adebug(
+                    "Consuming transformed chunk. Record batch num rows: %s, record batch MiB: %s, data chunk size: %s. Total records so far: %s, total file MiB so far: %s",
+                    num_records_in_batch,
+                    num_bytes_in_batch / 1024**2,
+                    chunk_size,
+                    total_records_count,
+                    total_file_bytes_count / 1024**2,
+                )
+
+                await self.consume_chunk(data=chunk)
+                self.bytes_exported_counter.add(chunk_size)
+
             await self.finalize()
 
         except Exception:
@@ -1272,12 +1284,12 @@ class ConsumerFromStage:
             raise
 
         await self.logger.adebug(
-            "Finished consuming %s records, %s MiB from %s record batches",
-            records_count,
-            bytes_count / 1024**2,
-            record_batches_count,
+            "Finished consuming %s records from %s record batches. Total file MiB: %s",
+            total_records_count,
+            total_record_batches_count,
+            total_file_bytes_count / 1024**2,
         )
-        return records_count
+        return total_records_count
 
     async def generate_record_batches_from_queue(
         self,

@@ -297,7 +297,7 @@ class PasswordResetSerializer(serializers.Serializer):
             )
 
         try:
-            user = User.objects.filter(is_active=True).get(email=email)
+            user = User.objects.filter(is_active=True).get(email__iexact=email)
         except User.DoesNotExist:
             user = None
 

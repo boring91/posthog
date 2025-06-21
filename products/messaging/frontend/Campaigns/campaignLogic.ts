@@ -8,7 +8,7 @@ import { urls } from 'scenes/urls'
 
 import type { campaignLogicType } from './campaignLogicType'
 import { campaignSceneLogic } from './campaignSceneLogic'
-import type { HogFlow, HogFlowAction, HogFlowEdge } from './Workflows/types'
+import type { HogFlow, HogFlowAction } from './hogflows/types'
 
 export interface CampaignLogicProps {
     id?: string
@@ -17,34 +17,31 @@ export interface CampaignLogicProps {
 const NEW_CAMPAIGN: HogFlow = {
     id: 'new',
     name: '',
-    edges: [
-        {
-            type: 'continue',
-            from: 'trigger_node',
-            to: 'exit_node',
-            index: 0,
-        },
-    ],
     actions: [
         {
             id: 'trigger_node',
             type: 'trigger',
+            name: 'Trigger',
             description: '',
-            config: {
-                inputs: {},
-            },
             created_at: 0,
             updated_at: 0,
+            next_actions: {
+                continue: {
+                    action_id: 'exit_node',
+                },
+            },
         },
         {
             id: 'exit_node',
             type: 'exit',
-            description: '',
+            name: 'Exit',
             config: {
-                inputs: {},
+                reason: 'Default exit',
             },
+            description: '',
             created_at: 0,
             updated_at: 0,
+            next_actions: {},
         },
     ],
     trigger: { type: 'event' },
@@ -56,7 +53,7 @@ const NEW_CAMPAIGN: HogFlow = {
     team_id: -1,
 }
 
-export type OnWorkflowChange = ({ actions, edges }: { actions: HogFlowAction[]; edges: HogFlowEdge[] }) => void
+export type OnWorkflowChange = ({ actions }: { actions: HogFlowAction[] }) => void
 
 export const campaignLogic = kea<campaignLogicType>([
     path(['products', 'messaging', 'frontend', 'Campaigns', 'campaignLogic']),
@@ -85,7 +82,7 @@ export const campaignLogic = kea<campaignLogicType>([
     })),
     forms(({ actions }) => ({
         campaign: {
-            defaults: { ...NEW_CAMPAIGN },
+            defaults: { ...NEW_CAMPAIGN } as HogFlow,
             submit: async (values) => {
                 actions.saveCampaign(values)
             },

@@ -8,10 +8,9 @@ from ee.session_recordings.session_summary.input_data import (
     add_context_and_filter_events,
     get_session_events,
     get_session_metadata,
-    get_team,
 )
 from ee.session_recordings.session_summary.prompt_data import SessionSummaryPromptData
-from ee.session_recordings.session_summary.utils import load_custom_template, serialize_to_sse_event, shorten_url
+from ee.session_recordings.session_summary.utils import load_custom_template, shorten_url
 from posthog.api.activity_log import ServerTimingsGathered
 from posthog.session_recordings.models.metadata import RecordingMetadata
 from posthog.warehouse.util import database_sync_to_async
@@ -40,7 +39,7 @@ class _SessionSummaryPromptData:
 
 
 @dataclass(frozen=True)
-class _SessionSummaryPrompt:
+class SessionSummaryPrompt:
     summary_prompt: str
     system_prompt: str
 
@@ -50,8 +49,8 @@ class SingleSessionSummaryData:
     session_id: str
     user_pk: int
     prompt_data: _SessionSummaryPromptData | None
-    prompt: _SessionSummaryPrompt | None
-    sse_error_msg: str | None = None
+    prompt: SessionSummaryPrompt | None
+    error_msg: str | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -73,18 +72,16 @@ class SingleSessionSummaryLlmInputs:
 async def get_session_data_from_db(
     session_id: str, team_id: int, timer: ServerTimingsGathered, local_reads_prod: bool
 ) -> _SessionSummaryDBData:
-    with timer("get_team"):
-        team = await database_sync_to_async(get_team)(team_id)
     with timer("get_metadata"):
         session_metadata = await database_sync_to_async(get_session_metadata)(
             session_id=session_id,
-            team=team,
+            team_id=team_id,
             local_reads_prod=local_reads_prod,
         )
     try:
         with timer("get_events"):
             session_events_columns, session_events = await database_sync_to_async(get_session_events)(
-                team=team,
+                team_id=team_id,
                 session_metadata=session_metadata,
                 session_id=session_id,
                 local_reads_prod=local_reads_prod,
@@ -148,19 +145,19 @@ def prepare_prompt_data(
     )
 
 
-def generate_prompt(
+def generate_single_session_summary_prompt(
     prompt_data: SessionSummaryPromptData,
     url_mapping_reversed: dict[str, str],
     window_mapping_reversed: dict[str, str],
     extra_summary_context: ExtraSummaryContext | None,
-) -> _SessionSummaryPrompt:
+) -> SessionSummaryPrompt:
     # Keep shortened URLs for the prompt to reduce the number of tokens
     short_url_mapping_reversed = {k: shorten_url(v) for k, v in url_mapping_reversed.items()}
     # Render all templates
     template_dir = Path(__file__).parent / "templates" / "identify-objectives"
     system_prompt = load_custom_template(
         template_dir,
-        f"system-prompt.djt",
+        "system-prompt.djt",
         {
             "FOCUS_AREA": extra_summary_context.focus_area if extra_summary_context else None,
         },
@@ -178,7 +175,7 @@ def generate_prompt(
             "FOCUS_AREA": extra_summary_context.focus_area if extra_summary_context else None,
         },
     )
-    return _SessionSummaryPrompt(
+    return SessionSummaryPrompt(
         summary_prompt=summary_prompt,
         system_prompt=system_prompt,
     )
@@ -200,12 +197,12 @@ async def prepare_data_for_single_session_summary(
     )
     if not db_data.session_events or not db_data.session_events_columns:
         # Real-time replays could have no events yet, so we need to handle that case and show users a meaningful message
-        sse_error_msg = serialize_to_sse_event(
-            event_label="session-summary-error",
-            event_data="No events found for this replay yet. Please try again in a few minutes.",
-        )
         return SingleSessionSummaryData(
-            session_id=session_id, user_pk=user_pk, prompt_data=None, prompt=None, sse_error_msg=sse_error_msg
+            session_id=session_id,
+            user_pk=user_pk,
+            prompt_data=None,
+            prompt=None,
+            error_msg="No events found for this replay yet. Please try again in a few minutes.",
         )
     prompt_data = prepare_prompt_data(
         session_id=session_id,
@@ -215,7 +212,7 @@ async def prepare_data_for_single_session_summary(
         session_events=db_data.session_events,
         timer=timer,
     )
-    prompt = generate_prompt(
+    prompt = generate_single_session_summary_prompt(
         prompt_data=prompt_data.prompt_data,
         url_mapping_reversed=prompt_data.url_mapping_reversed,
         window_mapping_reversed=prompt_data.window_mapping_reversed,

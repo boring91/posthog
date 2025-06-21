@@ -457,6 +457,25 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         organizationBased: true,
         layout: 'app-container',
     },
+    [Scene.MessagingBroadcasts]: {
+        projectBased: true,
+        name: 'Messaging broadcasts',
+    },
+    [Scene.MessagingCampaigns]: {
+        projectBased: true,
+        name: 'Messaging campaigns',
+    },
+    [Scene.MessagingLibrary]: {
+        projectBased: true,
+        name: 'Messaging library',
+    },
+    [Scene.OAuthAuthorize]: {
+        name: 'Authorize',
+        layout: 'plain',
+        projectBased: false,
+        organizationBased: false,
+        allowUnauthenticated: true,
+    },
     [Scene.HogFunction]: {
         projectBased: true,
         name: 'Hog function',
@@ -691,6 +710,7 @@ export const routes: Record<string, [Scene | string, string]> = {
     [urls.wizard()]: [Scene.Wizard, 'wizard'],
     [urls.startups()]: [Scene.StartupProgram, 'startupProgram'],
     [urls.startups(':referrer')]: [Scene.StartupProgram, 'startupProgramWithReferrer'],
+    [urls.oauthAuthorize()]: [Scene.OAuthAuthorize, 'oauthAuthorize'],
     [urls.dataPipelines(':kind')]: [Scene.DataPipelines, 'dataPipelines'],
     [urls.dataPipelinesNew(':kind')]: [Scene.DataPipelinesNew, 'dataPipelinesNew'],
     [urls.dataWarehouseSourceNew()]: [Scene.DataWarehouseSourceNew, 'dataWarehouseSourceNew'],

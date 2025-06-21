@@ -2,6 +2,7 @@ import { IconCheck } from '@posthog/icons'
 import { LemonBadge, LemonButton, LemonSwitch } from '@posthog/lemon-ui'
 import clsx from 'clsx'
 import { useActions, useValues } from 'kea'
+import { TZLabel } from 'lib/components/TZLabel'
 import { dayjs } from 'lib/dayjs'
 import { usePageVisibilityCb } from 'lib/hooks/usePageVisibility'
 import { IconRefresh } from 'lib/lemon-ui/icons'
@@ -12,8 +13,12 @@ import { humanFriendlyDuration } from 'lib/utils'
 import { dashboardLogic } from 'scenes/dashboard/dashboardLogic'
 
 export const LastRefreshText = (): JSX.Element => {
-    const { newestRefreshed } = useValues(dashboardLogic)
-    return <span>Last updated {newestRefreshed ? dayjs(newestRefreshed).fromNow() : 'a while ago'}</span>
+    const { lastDashboardRefresh } = useValues(dashboardLogic)
+    return (
+        <div className="flex items-center gap-1">
+            Last refreshed {lastDashboardRefresh ? <TZLabel time={lastDashboardRefresh} /> : 'a while ago'}
+        </div>
+    )
 }
 
 const REFRESH_INTERVAL_SECONDS = [1800, 3600]
@@ -28,9 +33,9 @@ const INTERVAL_OPTIONS = [
 ]
 
 export function DashboardReloadAction(): JSX.Element {
-    const { itemsLoading, autoRefresh, refreshMetrics, blockRefresh, oldestClientRefreshAllowed } =
+    const { itemsLoading, autoRefresh, refreshMetrics, blockRefresh, nextAllowedDashboardRefresh, dashboardLoadData } =
         useValues(dashboardLogic)
-    const { refreshAllDashboardItemsManual, setAutoRefresh, setPageVisibility } = useActions(dashboardLogic)
+    const { triggerDashboardRefresh, setAutoRefresh, setPageVisibility } = useActions(dashboardLogic)
 
     usePageVisibilityCb((pageIsVisible) => {
         setPageVisibility(pageIsVisible)
@@ -46,16 +51,16 @@ export function DashboardReloadAction(): JSX.Element {
     return (
         <div className="relative">
             <LemonButton
-                onClick={() => refreshAllDashboardItemsManual()}
+                onClick={() => triggerDashboardRefresh()}
                 type="secondary"
                 icon={itemsLoading ? <Spinner textColored /> : blockRefresh ? <IconCheck /> : <IconRefresh />}
                 size="small"
                 data-attr="dashboard-items-action-refresh"
                 disabledReason={
                     blockRefresh
-                        ? `Next bulk refresh possible ${dayjs(oldestClientRefreshAllowed).fromNow()}`
+                        ? `Next bulk refresh possible ${dayjs(nextAllowedDashboardRefresh).fromNow()}`
                         : itemsLoading
-                        ? 'Refreshing...'
+                        ? 'Loading...'
                         : ''
                 }
                 sideAction={{
@@ -105,10 +110,11 @@ export function DashboardReloadAction(): JSX.Element {
                         <>
                             {refreshMetrics.total ? (
                                 <>
-                                    Refreshed {refreshMetrics.completed} out of {refreshMetrics.total}
+                                    {dashboardLoadData?.action === 'initial_load' ? 'Loaded' : 'Refreshed'}{' '}
+                                    {refreshMetrics.completed} out of {refreshMetrics.total}
                                 </>
                             ) : (
-                                <>Refreshing...</>
+                                <>{dashboardLoadData?.action === 'initial_load' ? 'Loading' : 'Refreshing'}...</>
                             )}
                         </>
                     ) : (

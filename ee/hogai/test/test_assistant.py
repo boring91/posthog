@@ -201,7 +201,7 @@ class TestAssistant(ClickhouseTestMixin, NonAtomicBaseTest):
     )
     def test_reasoning_messages_added(self, _mock_query_executor_run, _mock_funnel_planner_run):
         output, _ = self._run_assistant_graph(
-            InsightsAssistantGraph(self.team)
+            InsightsAssistantGraph(self.team, self.user)
             .add_edge(AssistantNodeName.START, AssistantNodeName.TRENDS_PLANNER)
             .add_trends_planner(AssistantNodeName.QUERY_EXECUTOR, AssistantNodeName.END)
             .add_query_executor(AssistantNodeName.END)
@@ -264,7 +264,7 @@ class TestAssistant(ClickhouseTestMixin, NonAtomicBaseTest):
     )
     def test_reasoning_messages_with_substeps_added(self, _mock_funnel_planner_run):
         output, _ = self._run_assistant_graph(
-            InsightsAssistantGraph(self.team)
+            InsightsAssistantGraph(self.team, self.user)
             .add_edge(AssistantNodeName.START, AssistantNodeName.TRENDS_PLANNER)
             .add_trends_planner(AssistantNodeName.END, AssistantNodeName.END)
             .compile(),
@@ -330,7 +330,7 @@ class TestAssistant(ClickhouseTestMixin, NonAtomicBaseTest):
             ),
         ):
             output, _ = self._run_assistant_graph(
-                InsightsAssistantGraph(self.team)
+                InsightsAssistantGraph(self.team, self.user)
                 .add_edge(AssistantNodeName.START, AssistantNodeName.TRENDS_PLANNER)
                 .add_trends_planner(AssistantNodeName.END, AssistantNodeName.END)
                 .compile(),
@@ -451,7 +451,7 @@ class TestAssistant(ClickhouseTestMixin, NonAtomicBaseTest):
     def test_ai_messages_appended_after_interrupt(self):
         with patch("ee.hogai.graph.taxonomy_agent.nodes.TaxonomyAgentPlannerNode._model") as mock:
             graph = (
-                InsightsAssistantGraph(self.team)
+                InsightsAssistantGraph(self.team, self.user)
                 .add_edge(AssistantNodeName.START, AssistantNodeName.TRENDS_PLANNER)
                 .add_trends_planner(AssistantNodeName.END, AssistantNodeName.END)
                 .compile()

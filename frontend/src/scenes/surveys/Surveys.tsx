@@ -24,7 +24,9 @@ import { createdAtColumn, createdByColumn } from 'lib/lemon-ui/LemonTable/column
 import { LemonTableLink } from 'lib/lemon-ui/LemonTable/LemonTableLink'
 import { LemonTabs } from 'lib/lemon-ui/LemonTabs'
 import stringWithWBR from 'lib/utils/stringWithWBR'
+import posthog from 'posthog-js'
 import { LinkedHogFunctions } from 'scenes/hog-functions/list/LinkedHogFunctions'
+import MaxTool from 'scenes/max/MaxTool'
 import { SceneExport } from 'scenes/sceneTypes'
 import { isSurveyRunning } from 'scenes/surveys/utils'
 import { urls } from 'scenes/urls'
@@ -37,12 +39,72 @@ import { SurveysDisabledBanner, SurveySettings } from './SurveySettings'
 import { getSurveyStatus, surveysLogic, SurveysTabs } from './surveysLogic'
 
 export const scene: SceneExport = {
-    component: Surveys,
+    component: SurveysWithMaxTool,
     logic: surveysLogic,
     settingSectionId: 'environment-surveys',
 }
 
-export function Surveys(): JSX.Element {
+function SurveysWithMaxTool(): JSX.Element {
+    const {
+        data: { surveys },
+    } = useValues(surveysLogic)
+
+    const { loadSurveys } = useActions(surveysLogic)
+    const { user } = useValues(userLogic)
+
+    // If the user is not loaded, wait for it to load to show the surveys' Max tool
+    if (!user?.uuid) {
+        return <Surveys />
+    }
+
+    return (
+        <MaxTool
+            name="create_survey"
+            displayName="AI Survey Creator"
+            initialMaxPrompt="Create a survey to understand "
+            suggestions={[
+                'Create an NPS survey for customers who completed checkout',
+                'Create a feedback survey asking about our new dashboard',
+                'Create a product-market fit survey for trial users',
+                'Create a quick satisfaction survey for support interactions',
+            ]}
+            context={{
+                existing_surveys: surveys
+                    .filter((survey) => getSurveyStatus(survey) === ProgressStatus.Running)
+                    .map((survey) => ({
+                        id: survey.id,
+                        name: survey.name,
+                        type: survey.type,
+                        questions_count: survey.questions?.length || 0,
+                        status: getSurveyStatus(survey),
+                    })),
+                total_surveys_count: surveys.length,
+                user_id: user.uuid,
+            }}
+            callback={(toolOutput: {
+                survey_id?: string
+                survey_name?: string
+                launched?: boolean
+                error?: string
+            }) => {
+                if (toolOutput?.error || !toolOutput?.survey_id) {
+                    posthog.captureException('survey-creation-failed', {
+                        error: toolOutput.error,
+                    })
+                    return
+                }
+
+                // Refresh surveys list to show new survey, then redirect to it
+                loadSurveys()
+                router.actions.push(urls.survey(toolOutput.survey_id))
+            }}
+        >
+            <Surveys />
+        </MaxTool>
+    )
+}
+
+function Surveys(): JSX.Element {
     const {
         data: { surveys },
         searchedSurveys,

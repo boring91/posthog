@@ -5,7 +5,7 @@ import { TaxonomicFilterGroupType } from 'lib/components/TaxonomicFilter/types'
 
 import { useMocks } from '~/mocks/jest'
 import { initKeaTests } from '~/test/init'
-import { DashboardType, InsightShortId, QueryBasedInsightModel } from '~/types'
+import { DashboardType, InsightShortId, QueryBasedInsightModel, SidePanelTab } from '~/types'
 
 import { maxContextLogic } from './maxContextLogic'
 import { maxMocks } from './testUtils'
@@ -354,6 +354,36 @@ describe('maxContextLogic', () => {
                 })
             }).toMatchValues({
                 useCurrentPageContext: true,
+            })
+        })
+
+        it('preserves context when only panel parameter changes (side panel opening/closing)', async () => {
+            logic.actions.addOrUpdateContextInsight(mockInsight)
+            logic.actions.addOrUpdateContextDashboard(mockDashboard)
+
+            await expectLogic(logic).toMatchValues({
+                contextInsights: [expectedTransformedInsight],
+                contextDashboards: [expectedTransformedDashboard],
+            })
+
+            // Simulate opening side panel by changing only the panel hash parameter
+            await expectLogic(logic, () => {
+                router.actions.replace(router.values.location.pathname, router.values.searchParams, {
+                    ...router.values.hashParams,
+                    panel: SidePanelTab.Max,
+                })
+            }).toMatchValues({
+                contextInsights: [expectedTransformedInsight],
+                contextDashboards: [expectedTransformedDashboard],
+            })
+
+            // Simulate closing side panel by removing the panel hash parameter
+            await expectLogic(logic, () => {
+                const { panel, ...otherHashParams } = router.values.hashParams
+                router.actions.replace(router.values.location.pathname, router.values.searchParams, otherHashParams)
+            }).toMatchValues({
+                contextInsights: [expectedTransformedInsight],
+                contextDashboards: [expectedTransformedDashboard],
             })
         })
     })

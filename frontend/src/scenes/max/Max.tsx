@@ -4,6 +4,7 @@ import {
     IconClockRewind,
     IconExternal,
     IconGear,
+    IconMinus,
     IconPlus,
     IconSidePanel,
 } from '@posthog/icons'
@@ -27,6 +28,8 @@ import { sidePanelLogic } from '~/layout/navigation-3000/sidepanel/sidePanelLogi
 import { SidePanelTab } from '~/types'
 
 import { AnimatedBackButton } from './components/AnimatedBackButton'
+import { QuestionInput } from './components/QuestionInput'
+import { QuestionInputWithSuggestions } from './components/QuestionInputWithSuggestions'
 import { ThreadAutoScroller } from './components/ThreadAutoScroller'
 import { ConversationHistory } from './ConversationHistory'
 import { HistoryPreview } from './HistoryPreview'
@@ -34,8 +37,6 @@ import { Intro } from './Intro'
 import { maxGlobalLogic } from './maxGlobalLogic'
 import { maxLogic } from './maxLogic'
 import { maxThreadLogic, MaxThreadLogicProps } from './maxThreadLogic'
-import { QuestionInput } from './QuestionInput'
-import { QuestionInputWithSuggestions } from './QuestionInputWithSuggestions'
 import { Thread } from './Thread'
 
 export const scene: SceneExport = {
@@ -82,6 +83,7 @@ export const MaxInstance = React.memo(function MaxInstance({ sidePanel }: MaxIns
     const { threadVisible, conversationHistoryVisible, chatTitle, backButtonDisabled, threadLogicKey, conversation } =
         useValues(maxLogic)
     const { startNewConversation, toggleConversationHistory, goBack } = useActions(maxLogic)
+    const { setIsFloatingMaxExpanded } = useActions(maxGlobalLogic)
 
     const threadProps: MaxThreadLogicProps = {
         conversationId: threadLogicKey,
@@ -100,17 +102,19 @@ export const MaxInstance = React.memo(function MaxInstance({ sidePanel }: MaxIns
             updateEarlyAccessFeatureEnrollment(FEATURE_FLAGS.ARTIFICIAL_HOG, true)
             setWasUserAutoEnrolled(true)
         }
-    }, [])
+    }, [featureFlags, updateEarlyAccessFeatureEnrollment])
 
     const headerButtons = (
         <>
-            <LemonButton
-                size="small"
-                icon={<IconPlus />}
-                onClick={() => startNewConversation()}
-                tooltip="Start a new chat"
-                tooltipPlacement="bottom"
-            />
+            {!conversationHistoryVisible && !threadVisible && (
+                <LemonButton
+                    size="small"
+                    icon={<IconPlus />}
+                    onClick={() => startNewConversation()}
+                    tooltip="Start a new chat"
+                    tooltipPlacement="bottom"
+                />
+            )}
             <LemonButton
                 size="small"
                 sideIcon={<IconClockRewind />}
@@ -135,7 +139,13 @@ export const MaxInstance = React.memo(function MaxInstance({ sidePanel }: MaxIns
     return (
         <>
             {sidePanel && (
-                <SidePanelPaneHeader className="transition-all duration-200">
+                <SidePanelPaneHeader
+                    className="transition-all duration-200"
+                    onClose={() => {
+                        startNewConversation()
+                        setIsFloatingMaxExpanded(false)
+                    }}
+                >
                     <div className="flex flex-1">
                         <div className="flex items-center flex-1">
                             <AnimatedBackButton in={!backButtonDisabled}>
@@ -168,13 +178,15 @@ export const MaxInstance = React.memo(function MaxInstance({ sidePanel }: MaxIns
                                 <LemonSkeleton className="h-5 w-48 ml-1" />
                             )}
                         </div>
-                        <LemonButton
-                            size="small"
-                            icon={<IconPlus />}
-                            onClick={() => startNewConversation()}
-                            tooltip="Start a new chat"
-                            tooltipPlacement="bottom"
-                        />
+                        {!conversationHistoryVisible && !threadVisible && (
+                            <LemonButton
+                                size="small"
+                                icon={<IconPlus />}
+                                onClick={() => startNewConversation()}
+                                tooltip="Start a new chat"
+                                tooltipPlacement="bottom"
+                            />
+                        )}
                         <LemonButton
                             size="small"
                             sideIcon={<IconExternal />}
@@ -182,6 +194,15 @@ export const MaxInstance = React.memo(function MaxInstance({ sidePanel }: MaxIns
                             onClick={() => closeSidePanel()}
                             tooltip="Open as main focus"
                             tooltipPlacement="bottom-end"
+                        />
+                        <LemonButton
+                            size="small"
+                            sideIcon={<IconMinus />}
+                            onClick={() => {
+                                closeSidePanel()
+                                setIsFloatingMaxExpanded(true)
+                            }}
+                            tooltip="Minimize to floating Max"
                         />
                     </div>
                 </SidePanelPaneHeader>
@@ -225,8 +246,8 @@ export const MaxInstance = React.memo(function MaxInstance({ sidePanel }: MaxIns
                 ) : (
                     /** Must be the last child and be a direct descendant of the scrollable element */
                     <ThreadAutoScroller>
-                        <Thread />
-                        <QuestionInput isFloating />
+                        <Thread className="p-3" />
+                        <QuestionInput />
                     </ThreadAutoScroller>
                 )}
             </BindLogic>

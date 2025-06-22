@@ -4,7 +4,7 @@
 
 services:
     proxy:
-        image: caddy
+        image: caddy:2.6.1
         entrypoint: sh
         restart: always
         command: -c 'set -x && echo "$$CADDYFILE" > /etc/caddy/Caddyfile && exec caddy run -c /etc/caddy/Caddyfile'
@@ -98,7 +98,7 @@ services:
         # Note: please keep the default version in sync across
         #       `posthog` and the `charts-clickhouse` repos
         #
-        image: ${CLICKHOUSE_SERVER_IMAGE:-clickhouse/clickhouse-server:24.8.14.39}
+        image: clickhouse/clickhouse-server:24.8.14.39
         restart: on-failure
         environment:
             CLICKHOUSE_SKIP_USER_SETUP: 1
@@ -124,7 +124,7 @@ services:
             retries: 10
 
     kafka_ui:
-        image: provectuslabs/kafka-ui:latest
+        image: provectuslabs/kafka-ui:v0.7.2
         restart: on-failure
         environment:
             KAFKA_CLUSTERS_0_NAME: local
@@ -182,7 +182,7 @@ services:
         restart: on-failure
 
     capture:
-        image: ghcr.io/posthog/posthog/capture:master
+        image: ghcr.io/posthog/posthog/capture:sha-fb43572
         build:
             context: rust/
             args:
@@ -197,7 +197,7 @@ services:
             RUST_LOG: 'info,rdkafka=warn'
 
     replay-capture:
-        image: ghcr.io/posthog/posthog/capture:master
+        image: ghcr.io/posthog/posthog/capture:sha-fb43572
         build:
             context: rust/
             args:
@@ -211,7 +211,7 @@ services:
             CAPTURE_MODE: recordings
 
     property-defs-rs:
-        image: ghcr.io/posthog/posthog/property-defs-rs:master
+        image: ghcr.io/posthog/posthog/property-defs-rs:sha-fb43572
         build:
             context: rust/
             args:
@@ -225,7 +225,7 @@ services:
             FILTER_MODE: 'opt-out'
 
     feature-flags:
-        image: ghcr.io/posthog/posthog/feature-flags:master
+        image: ghcr.io/posthog/posthog/feature-flags:sha-fb43572
         build:
             context: rust/
             args:
@@ -262,7 +262,7 @@ services:
             CLICKHOUSE_VERIFY: 'false'
 
     livestream:
-        image: 'ghcr.io/posthog/livestream:main'
+        image: 'ghcr.io/posthog/livestream:main' # we couldnt't find the version number
         restart: on-failure
         depends_on:
             kafka:
@@ -351,7 +351,7 @@ services:
             TEMPORAL_HOST: temporal
 
     cyclotron-fetch:
-        image: ghcr.io/posthog/posthog/cyclotron-fetch:master
+        image: ghcr.io/posthog/posthog/cyclotron-fetch:sha-fb43572
         build:
             context: rust/
             args:
@@ -373,7 +373,7 @@ services:
                 condition: service_started
 
     cyclotron-janitor:
-        image: ghcr.io/posthog/posthog/cyclotron-janitor:master
+        image: ghcr.io/posthog/posthog/cyclotron-janitor:sha-fb43572
         build:
             context: rust/
             args:
@@ -389,7 +389,7 @@ services:
             kafka:
                 condition: service_started
     otel-collector:
-        image: otel/opentelemetry-collector-contrib:latest
+        image: otel/opentelemetry-collector-contrib:sha256-1ab0baba0ee3695d823c46653d8a6e8894896e668ce8bd7ebe002e948d827bc7.sig
         container_name: otel-collector-local
         command: [--config=/etc/otel-collector-config.yaml]
         volumes:
@@ -405,7 +405,7 @@ services:
             - otel_network
 
     jaeger:
-        image: jaegertracing/all-in-one:latest
+        image: jaegertracing/all-in-one:1.70.0
         container_name: jaeger-local
         ports:
             - '16686:16686' # Jaeger UI

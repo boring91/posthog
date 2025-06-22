@@ -121,7 +121,7 @@ services:
         image: ghcr.io/posthog/posthog/feature-flags:sha-fb43572
         restart: on-failure
         volumes:
-            - ./share:/share
+            - ./posthog/share:/share
         environment:
             WRITE_DATABASE_URL: 'postgres://posthog:posthog@db:5432/posthog'
             READ_DATABASE_URL: 'postgres://posthog:posthog@db:5432/posthog'

@@ -64,8 +64,10 @@ echo "Installing PostHog 🦔 from Github"
 sudo apt install -y git
 # try to clone - if folder is already there pull latest for that branch
 git clone https://github.com/boring91/posthog.git &> /dev/null || true
-cd posthog
 
+# Download geoip
+cd posthog
+posthog/bin/download-mmdb
 cd ..
 
 if [ -n "$3" ]

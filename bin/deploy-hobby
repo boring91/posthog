@@ -6,7 +6,7 @@ export DEBIAN_FRONTEND=noninteractive
 # Automatically restart without asking.
 # this gets around needrestart command halting for user input
 export RESTART_MODE=l
-export POSTHOG_APP_TAG="${POSTHOG_APP_TAG:-latest}"
+export POSTHOG_APP_TAG="8a1badb5b0e4ae9876f449322ef1ca159f059397"
 
 POSTHOG_SECRET=$(head -c 28 /dev/urandom | sha224sum -b | head -c 56)
 export POSTHOG_SECRET
@@ -25,23 +25,7 @@ echo ""
 
 if ! [ -z "$1" ]
 then
-export POSTHOG_APP_TAG=$1
-else
-echo "What version of PostHog would you like to install? (We default to 'latest')"
-echo "You can check out available versions here: https://hub.docker.com/r/posthog/posthog/tags"
-read -r POSTHOG_APP_TAG_READ
-if [ -z "$POSTHOG_APP_TAG_READ" ]
-then
-    echo "Using default and installing $POSTHOG_APP_TAG"
-else
-    export POSTHOG_APP_TAG=$POSTHOG_APP_TAG_READ
-    echo "Using provided tag: $POSTHOG_APP_TAG"
-fi
-fi
-echo ""
-if ! [ -z "$2" ]
-then
-export DOMAIN=$2
+export DOMAIN=$1
 else
 echo "Let's get the exact domain PostHog will be installed on"
 echo "Make sure that you have a Host A DNS record pointing to this instance!"
